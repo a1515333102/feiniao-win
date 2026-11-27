@@ -16,6 +16,7 @@ import (
 	"server/app/logic/common/cron"
 	"server/app/logic/common/cron/functions"
 	"server/app/logic/common/lastTimeBuffer"
+	rmbPayLogic "server/app/logic/common/rmbPay"
 	"server/app/logic/common/setting"
 	"server/app/logic/webSocket"
 	"server/app/router"
@@ -98,6 +99,12 @@ func 主程序_初始化定时任务() {
 	局_错误 = cron.Q全_定时任务.T添加本机任务("在线心跳LastTime批量回写", "*/30 * * * * *", lastTimeBuffer.X心跳_回写)
 	if 局_错误 != nil {
 		global.GVA_LOG.Println("添加在线心跳LastTime批量回写定时任务失败:" + 局_错误.Error())
+	}
+	// 支付订单主动查单:每30秒向上游查询待支付订单,已支付的补记入账。
+	// 用途是不依赖异步回调也能到账(内网调试、通知丢失、防火墙拦截等场景)
+	局_错误 = cron.Q全_定时任务.T添加本机任务("支付订单主动查单", "*/30 * * * * *", rmbPayLogic.L_rmbPay.K查单任务)
+	if 局_错误 != nil {
+		global.GVA_LOG.Println("添加支付订单主动查单定时任务失败:" + 局_错误.Error())
 	}
 	_ = functions.S刷新数据库定时任务(true)
 	functions.D定时任务_统计初始化日活月活(&gin.Context{})

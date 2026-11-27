@@ -24,6 +24,7 @@ web/dist/
 dist/权限测试.json
 ky/.runtime/
 ky/云函数/
+dist/云函数/
 ky/config.json
 # dist/config.json 运行时会被写入数据库密码与快验 token，不提交；
 # 仓库里保留一份空白模板 dist/config.example.json 供复制
