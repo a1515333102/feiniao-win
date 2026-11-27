@@ -71,7 +71,7 @@ replace EFunc => ../EFunc
 └── efunc_syms.json         扫描结果原始数据
 ```
 
-不进仓库的东西：`tools/`（Go 工具链 1.3G）、`full.bin`（官方二进制 78M）、`web/node_modules`、`dist/feiniao.exe`。
+不进仓库的东西：Go 工具链与模块缓存、`web/node_modules`、`dist` 下的可执行文件。这些均可重新获取，本机已清理，编译前装好 Go 1.25+ 即可。
 
 ---
 
