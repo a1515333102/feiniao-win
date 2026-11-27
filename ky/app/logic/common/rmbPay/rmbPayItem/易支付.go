@@ -18,7 +18,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 func init() {
@@ -87,7 +86,8 @@ func (j 易支付) D订单创建(c *gin.Context, 参数 *m.PayParams) (response 
 	// 组合协议和主机地址
 	baseURL := parsedURL.Scheme + "://" + parsedURL.Host
 	if parsedURL.Path == "" {
-		parsedURL.Path = "/submit.php"
+		// 10sn 这类免签平台用 mapi.php 返回 JSON(payurl/qrcode)，submit.php 只会返回跳转页
+		parsedURL.Path = "/mapi.php"
 	}
 	局_网址 := baseURL + parsedURL.Path //易支付v1通用
 
@@ -100,10 +100,9 @@ func (j 易支付) D订单创建(c *gin.Context, 参数 *m.PayParams) (response 
 	values.Set("pid", 局_支付配置.Y易支付商户ID)
 	values.Set("return_url", rmbPay.L_rmbPay.Z支付订单回调关键字转换(局_支付配置.Y易支付同步回调url, 参数))
 	values.Set("type", 局_支付配置.Y易支付支付方式)
-	values.Set("sitename", 参数.S商品名称)
-	values.Set("clientip", c.ClientIP())
-	values.Set("device", utils.S三元(局_支付配置.Y易支付设备类型 != "", 局_支付配置.Y易支付设备类型, utils2.Y易支付取设备类型(c.GetHeader("User-Agent"))))
-	values.Set("timestamp", strconv.FormatInt(time.Now().Unix(), 10))
+	// 只提交 pid/type/out_trade_no/money/name/notify_url/return_url 这七个业务参数。
+	// 10sn 等平台的验签是用固定字段集重算的，多传 sitename/clientip/device/timestamp
+	// 会让服务端拼出的待签串与本地不一致，直接返回「验签失败,请检查PID或Key是否正确!」
 
 	// 过滤掉不需要参与签名的参数
 	var 参数列表 []string
@@ -181,19 +180,30 @@ func (j 易支付) D订单创建(c *gin.Context, 参数 *m.PayParams) (response 
 			response.PayQRCode = 局_json.Get("urlscheme").String()
 		}
 
-		//判断response.PayQRCode  左边是否为http  如果不是http,就改生成 PayURL值的二维码
-		if !strings.HasPrefix(response.PayQRCode, "http") {
-			response.PayQRCodePNG = rmbPay.L_rmbPay.S生成二维码并转base64(response.PayURL)
-		} else {
-			response.PayQRCodePNG = rmbPay.L_rmbPay.S生成二维码并转base64(response.PayQRCode)
+		//二维码内容优先级:urlscheme/qrcode 形式的 scheme > 上游 http 收款码 > 收银台地址
+		//10sn 的 qrcode 是 https://qr.alipay.com/xxx 这种支付宝收款码,直接扫就能付,
+		//比扫收银台页面少一步;没有 qrcode 时才退回用 PayURL 生成
+		二维码内容 := response.PayQRCode
+		if 二维码内容 == "" && strings.HasPrefix(局_json.Get("qrcode").String(), "http") {
+			二维码内容 = 局_json.Get("qrcode").String()
 		}
+		if 二维码内容 == "" {
+			二维码内容 = response.PayURL
+		}
+		response.PayQRCodePNG = rmbPay.L_rmbPay.S生成二维码并转base64(二维码内容)
 
 		return
 	}
 
-	jsonStr := strings.Replace(utils.W文本_取出中间文本(局_请求结果.String(), `href='`, `'`), "&amp;", "&", -1)
+	// 部分平台(submit.php)返回 <script>window.location.href='...'</script>，也有用双引号的
+	原始返回 := 局_请求结果.String()
+	jsonStr := utils.W文本_取出中间文本(原始返回, `href='`, `'`)
 	if jsonStr == "" {
-		err = errors.New("支付地址获取失败:" + 局_请求结果.String())
+		jsonStr = utils.W文本_取出中间文本(原始返回, `href="`, `"`)
+	}
+	jsonStr = strings.Replace(jsonStr, "&amp;", "&", -1)
+	if jsonStr == "" {
+		err = errors.New("支付地址获取失败:" + 原始返回)
 		return
 	}
 	// 处理返回结果
