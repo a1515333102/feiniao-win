@@ -1,0 +1,1 @@
+import{s as t}from"./request-f6c23afd.js";import{取 as o}from"./index-a2a45238.js";const s=o()+"/logMoney/",e=o=>t({url:s+"getList",method:"post",data:o}),a=o=>t({url:s+"delete",method:"post",data:o});export{a as D,e as G};

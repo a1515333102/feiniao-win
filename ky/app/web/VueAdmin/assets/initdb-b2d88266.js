@@ -1,0 +1,1 @@
+import{s}from"./request-f6c23afd.js";import{取 as t}from"./index-a2a45238.js";const o=t()+"/base/",e=t=>s({url:o+"initDB",method:"post",data:t}),r=()=>s({url:o+"checkDB",method:"post"});export{r as c,e as i};

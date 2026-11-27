@@ -1,0 +1,1 @@
+import{s as t}from"./request-f6c23afd.js";import{取 as s}from"./index-a2a45238.js";const e=s()+"/userConfig/",o=s=>t({url:e+"getList",method:"post",data:s}),a=s=>t({url:e+"delete",method:"post",data:s}),r=s=>t({url:e+"new",method:"post",data:s}),d=s=>t({url:e+"setUserConfig",method:"post",data:s});export{a as D,o as G,r as N,d as S};

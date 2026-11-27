@@ -28,6 +28,10 @@ func (h *HtmlHandler) RedirectIndex(c *gin.Context) {
 
 func (h *HtmlHandler) Index(c *gin.Context) {
 	c.Header("content-type", "text/html;charset=utf-8")
+	//入口页不缓存,理由同 VueAdmin:避免 index.html 被缓存后继续引用旧 JS
+	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
 	c.String(200, string(Html))
 	return
 }

@@ -19,6 +19,8 @@ ky/resource_windows_amd64.syso
 # ===== 前端依赖与构建中间产物 =====
 web/node_modules/
 web/dist/
+# 重新构建时旧产物先移到这里再替换,避免一次性删除触发保护
+.build-tmp/
 
 # ===== 运行时生成 =====
 dist/权限测试.json
