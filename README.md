@@ -115,7 +115,9 @@ Copy-Item -Recurse -Force dist\* ..\ky\app\web\VueAdmin\
 
 首次启动若没有 `config.json` 会在控制台提示输入 MySQL 信息。
 
-> 用户中心的资源路径写死了 `AppId=10001`，换其他应用 ID 需要改 `ky/app/web/webUser/index.html` 里的静态资源路径。
+> 用户中心地址是 `/user/{AppId}/`，**AppId 不是固定的**，同一套程序可服务任意多个应用。前端 JS 会用 `location.pathname` 里 `user/` 与下一个 `/` 之间的数字作为 AppId 发起请求，所以换个 AppId 换个 URL 就能进对应应用的界面。限制只有三条：AppId ≥ 10000、库里存在该应用、未停止运营。
+>
+> `index.html` 与 JS 里的静态资源前缀写死为 `/user/10001/assets/`，但静态路由同样接受任意 AppId，因此换 AppId 后资源照常加载，只是请求路径仍显示 10001，属界面外的观感问题，不影响功能。
 
 ---
 
