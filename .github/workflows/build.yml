@@ -103,6 +103,7 @@ jobs:
           path: |
             dist/feiniao.exe
             dist/feiniao.exe.sha256
+            dist/config.example.json
           if-no-files-found: error
           retention-days: 30
 
@@ -133,14 +134,23 @@ jobs:
           files: |
             dist/feiniao.exe
             dist/feiniao.exe.sha256
+            dist/config.example.json
           generate_release_notes: true
           fail_on_unmatched_files: true
           body: |
             Windows 版自编译产物（Go 静态编译，单文件，无需运行时）。
 
-            - 版本：`${{ github.ref_name }}`
-            - 架构：windows/amd64
-            - 校验：见 `feiniao.exe.sha256`
+            | 文件 | 用途 |
+            |---|---|
+            | `feiniao.exe` | 主程序，81 MB |
+            | `config.example.json` | 配置模板，首次运行前复制为 `config.json` |
+            | `feiniao.exe.sha256` | 校验和，`sha256sum -c feiniao.exe.sha256` 验证 |
 
-            **首次运行**：把 `dist/config.example.json` 复制为同目录 `config.json`，
-            填好 MySQL 连接后启动，浏览器打开 `http://127.0.0.1:18888/Admin/`。
+            **首次运行**
+
+            1. 把 `config.example.json` 复制为同目录的 `config.json`
+            2. 填 `mysql` 段的 `path`（地址）、`port`、`username`、`password`、`dbname`
+            3. 启动 `feiniao.exe`，浏览器打开 `http://127.0.0.1:18888/Admin/`
+            4. 首次进入按提示初始化数据库
+
+            需要 MySQL 5.7+，数据表引擎必须是 InnoDB。
