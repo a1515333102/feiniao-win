@@ -1,0 +1,1 @@
+import{h as s}from"./http.B3ACCZg-.js";const t=(t,e={})=>s.post("/userApi/webUserCoupon/"+t,e),e=()=>t("getReceiveList"),o=s=>t("receive",{couponId:s}),a=(s=0)=>t("getMyList",{status:s}),p=s=>t("getPayKaCouponList",{kaClassId:s});export{a,p as b,e as g,o as r};

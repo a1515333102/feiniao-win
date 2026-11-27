@@ -1,0 +1,17 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="GoDfaErrorMayBeNotNil" enabled="true" level="WARNING" enabled_by_default="true">
+      <functions>
+        <function importPath="server/new/app/logic/agent/L_setting" name="Q取代理在线支付信息" />
+      </functions>
+      <methods>
+        <method importPath="server/new/app/service" receiver="*PromotionCode" name="Info" />
+        <method importPath="server/new/app/service" receiver="*User" name="InfoName" />
+        <method importPath="server/new/app/service" receiver="*User" name="Info" />
+      </methods>
+    </inspection_tool>
+    <inspection_tool class="JSNonASCIINames" enabled="false" level="WARNING" enabled_by_default="false" />
+    <inspection_tool class="NonAsciiCharacters" enabled="false" level="WARNING" enabled_by_default="false" />
+  </profile>
+</component>

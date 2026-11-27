@@ -1,0 +1,33 @@
+# ===== 工具链（体积大，按需自备，不做版本管理）=====
+tools/
+
+# ===== 官方原始二进制与提取中间产物 =====
+full.bin
+extracted/
+html_*.html
+
+# ===== 上游 git 历史归档（仅本机保留）=====
+.git-archived/
+
+# ===== 编译产物（exe 走 Release，不进仓库）=====
+dist/feiniao.exe
+dist/*.exe
+*.log
+
+# ===== 前端依赖与构建中间产物 =====
+web/node_modules/
+web/dist/
+
+# ===== 运行时生成 =====
+dist/权限测试.json
+ky/.runtime/
+ky/云函数/
+ky/config.json
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 工作目录数据 =====
+.workbuddy/

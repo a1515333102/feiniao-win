@@ -1,0 +1,441 @@
+{
+  "summary": {
+    "go_files": 436,
+    "dependent_files": 102,
+    "dot_import_files": 64,
+    "alias_import_files": 38,
+    "symbols_total": 71,
+    "high": 40,
+    "low": 31
+  },
+  "high": [
+    {
+      "name": "Float64到文本",
+      "calls": 61,
+      "files": 17,
+      "ctx": "utils.Float64到文本(...)"
+    },
+    {
+      "name": "S三元",
+      "calls": 46,
+      "files": 20,
+      "ctx": "S三元("
+    },
+    {
+      "name": "Float64加float64",
+      "calls": 21,
+      "files": 11,
+      "ctx": "Float64加float64("
+    },
+    {
+      "name": "W文本_是否包含关键字",
+      "calls": 18,
+      "files": 7,
+      "ctx": "W文本_是否包含关键字("
+    },
+    {
+      "name": "Float64取负值",
+      "calls": 17,
+      "files": 9,
+      "ctx": "utils.Float64取负值(...)"
+    },
+    {
+      "name": "W文本_分割文本",
+      "calls": 15,
+      "files": 7,
+      "ctx": "utils.W文本_分割文本(...)"
+    },
+    {
+      "name": "W文件_是否存在",
+      "calls": 11,
+      "files": 7,
+      "ctx": "W文件_是否存在("
+    },
+    {
+      "name": "B编码_BASE64解码",
+      "calls": 11,
+      "files": 5,
+      "ctx": "B编码_BASE64解码("
+    },
+    {
+      "name": "S数组_整数是否存在",
+      "calls": 11,
+      "files": 8,
+      "ctx": "utils.S数组_整数是否存在(...)"
+    },
+    {
+      "name": "D到整数",
+      "calls": 10,
+      "files": 9,
+      "ctx": "utils.D到整数(...)"
+    },
+    {
+      "name": "W文本_取随机字符串",
+      "calls": 10,
+      "files": 8,
+      "ctx": "utils.W文本_取随机字符串(...)"
+    },
+    {
+      "name": "W文本_取出中间文本",
+      "calls": 9,
+      "files": 8,
+      "ctx": "W文本_取出中间文本("
+    },
+    {
+      "name": "Z正则_校验密码",
+      "calls": 9,
+      "files": 5,
+      "ctx": "utils.Z正则_校验密码(...)"
+    },
+    {
+      "name": "D到文本",
+      "calls": 9,
+      "files": 6,
+      "ctx": "D到文本("
+    },
+    {
+      "name": "S数组_去重复",
+      "calls": 9,
+      "files": 7,
+      "ctx": "utils.S数组_去重复(...)"
+    },
+    {
+      "name": "Float64取绝对值",
+      "calls": 9,
+      "files": 5,
+      "ctx": "utils.Float64取绝对值(...)"
+    },
+    {
+      "name": "W文本_取随机字符串_数字",
+      "calls": 8,
+      "files": 3,
+      "ctx": "utils.W文本_取随机字符串_数字(...)"
+    },
+    {
+      "name": "W文件_读入文件",
+      "calls": 7,
+      "files": 5,
+      "ctx": "W文件_读入文件("
+    },
+    {
+      "name": "Z正则_校验代理用户名",
+      "calls": 5,
+      "files": 4,
+      "ctx": "utils.Z正则_校验代理用户名(...)"
+    },
+    {
+      "name": "Z正则_取全部匹配子文本",
+      "calls": 5,
+      "files": 5,
+      "ctx": "utils.Z正则_取全部匹配子文本(...)"
+    },
+    {
+      "name": "W文本_去除敏感信息",
+      "calls": 5,
+      "files": 4,
+      "ctx": "W文本_去除敏感信息("
+    },
+    {
+      "name": "Int64到Float64",
+      "calls": 5,
+      "files": 3,
+      "ctx": "utils.Int64到Float64(...)"
+    },
+    {
+      "name": "B编码_BASE64编码",
+      "calls": 4,
+      "files": 2,
+      "ctx": "B编码_BASE64编码("
+    },
+    {
+      "name": "Float64除int64",
+      "calls": 4,
+      "files": 3,
+      "ctx": "utils.Float64除int64(...)"
+    },
+    {
+      "name": "C程序_取运行目录",
+      "calls": 3,
+      "files": 3,
+      "ctx": "C程序_取运行目录("
+    },
+    {
+      "name": "Z正则_校验email",
+      "calls": 3,
+      "files": 3,
+      "ctx": "utils.Z正则_校验email(...)"
+    },
+    {
+      "name": "W文本_取左边",
+      "calls": 3,
+      "files": 3,
+      "ctx": "utils.W文本_取左边(...)"
+    },
+    {
+      "name": "W文件_删除",
+      "calls": 3,
+      "files": 3,
+      "ctx": "W文件_删除("
+    },
+    {
+      "name": "W文件_保存",
+      "calls": 3,
+      "files": 2,
+      "ctx": "utils.W文件_保存(...)"
+    },
+    {
+      "name": "W文本_取文本右边",
+      "calls": 3,
+      "files": 3,
+      "ctx": "W文本_取文本右边("
+    },
+    {
+      "name": "Z字节集_字节集到十六进制",
+      "calls": 3,
+      "files": 2,
+      "ctx": "utils.Z字节集_字节集到十六进制(...)"
+    },
+    {
+      "name": "W文本_取文本左边",
+      "calls": 3,
+      "files": 3,
+      "ctx": "W文本_取文本左边("
+    },
+    {
+      "name": "M目录_创建",
+      "calls": 2,
+      "files": 2,
+      "ctx": "utils.M目录_创建(...)"
+    },
+    {
+      "name": "W文件_读入文本",
+      "calls": 2,
+      "files": 2,
+      "ctx": "W文件_读入文本("
+    },
+    {
+      "name": "W文本_删首尾空",
+      "calls": 1,
+      "files": 1,
+      "ctx": "utils.W文本_删首尾空(...)"
+    },
+    {
+      "name": "W文本_取长度",
+      "calls": 1,
+      "files": 1,
+      "ctx": "utils.W文本_取长度(...)"
+    },
+    {
+      "name": "S时间_取现行时间戳",
+      "calls": 1,
+      "files": 1,
+      "ctx": "utils.S时间_取现行时间戳(...)"
+    },
+    {
+      "name": "Map_键名是否存在",
+      "calls": 1,
+      "files": 1,
+      "ctx": "utils.Map_键名是否存在(...)"
+    },
+    {
+      "name": "W文本_取行数",
+      "calls": 1,
+      "files": 1,
+      "ctx": "utils.W文本_取行数(...)"
+    },
+    {
+      "name": "H汇编_取随机数",
+      "calls": 1,
+      "files": 1,
+      "ctx": "utils.H汇编_取随机数(...)"
+    }
+  ],
+  "low": [
+    {
+      "name": "Float64乘int64",
+      "calls": 8,
+      "files": 5,
+      "ctx": "Float64乘int64("
+    },
+    {
+      "name": "D到数值",
+      "calls": 5,
+      "files": 2,
+      "ctx": "D到数值("
+    },
+    {
+      "name": "Float64减float64",
+      "calls": 5,
+      "files": 3,
+      "ctx": "Float64减float64("
+    },
+    {
+      "name": "S时间_时间戳到时间",
+      "calls": 4,
+      "files": 2,
+      "ctx": "S时间_时间戳到时间("
+    },
+    {
+      "name": "S数组_是否存在",
+      "calls": 3,
+      "files": 3,
+      "ctx": "S数组_是否存在("
+    },
+    {
+      "name": "S数组_取文本出现次数",
+      "calls": 2,
+      "files": 2,
+      "ctx": "S数组_取文本出现次数("
+    },
+    {
+      "name": "W文本_是否为数字",
+      "calls": 2,
+      "files": 2,
+      "ctx": "W文本_是否为数字("
+    },
+    {
+      "name": "W文本_可能为json",
+      "calls": 2,
+      "files": 2,
+      "ctx": "W文本_可能为json("
+    },
+    {
+      "name": "Int32ToBytes",
+      "calls": 2,
+      "files": 1,
+      "ctx": "Int32ToBytes("
+    },
+    {
+      "name": "W文本_取右边",
+      "calls": 2,
+      "files": 2,
+      "ctx": "W文本_取右边("
+    },
+    {
+      "name": "T图片_生成二维码base64",
+      "calls": 2,
+      "files": 2,
+      "ctx": "T图片_生成二维码base64("
+    },
+    {
+      "name": "S数组_取差集",
+      "calls": 2,
+      "files": 1,
+      "ctx": "S数组_取差集("
+    },
+    {
+      "name": "W文件_取文件名",
+      "calls": 2,
+      "files": 1,
+      "ctx": "W文件_取文件名("
+    },
+    {
+      "name": "S时间_取现行时间戳13",
+      "calls": 2,
+      "files": 1,
+      "ctx": "S时间_取现行时间戳13("
+    },
+    {
+      "name": "W文件_写出文件",
+      "calls": 1,
+      "files": 1,
+      "ctx": "W文件_写出文件("
+    },
+    {
+      "name": "S数组_合并文本",
+      "calls": 1,
+      "files": 1,
+      "ctx": "S数组_合并文本("
+    },
+    {
+      "name": "W文本_是否存在_任意",
+      "calls": 1,
+      "files": 1,
+      "ctx": "W文本_是否存在_任意("
+    },
+    {
+      "name": "J校验_取md5_文本",
+      "calls": 1,
+      "files": 1,
+      "ctx": "J校验_取md5_文本("
+    },
+    {
+      "name": "S时间_秒转时间文本",
+      "calls": 1,
+      "files": 1,
+      "ctx": "S时间_秒转时间文本("
+    },
+    {
+      "name": "GetList2",
+      "calls": 1,
+      "files": 1,
+      "ctx": "GetList2{...}"
+    },
+    {
+      "name": "KaClassUp带调价信息",
+      "calls": 1,
+      "files": 1,
+      "ctx": "KaClassUp带调价信息{...}"
+    },
+    {
+      "name": "Float64乘Float64",
+      "calls": 1,
+      "files": 1,
+      "ctx": "Float64乘Float64("
+    },
+    {
+      "name": "S数组_整数取差集",
+      "calls": 1,
+      "files": 1,
+      "ctx": "S数组_整数取差集("
+    },
+    {
+      "name": "W文件_取父目录",
+      "calls": 1,
+      "files": 1,
+      "ctx": "W文件_取父目录("
+    },
+    {
+      "name": "W文件_写到文件",
+      "calls": 1,
+      "files": 1,
+      "ctx": "W文件_写到文件("
+    },
+    {
+      "name": "Update",
+      "calls": 1,
+      "files": 1,
+      "ctx": "Update("
+    },
+    {
+      "name": "D订单支付回调",
+      "calls": 1,
+      "files": 1,
+      "ctx": "D订单支付回调("
+    },
+    {
+      "name": "Q取通道名称",
+      "calls": 1,
+      "files": 1,
+      "ctx": "Q取通道名称("
+    },
+    {
+      "name": "Q取订单id",
+      "calls": 1,
+      "files": 1,
+      "ctx": "Q取订单id("
+    },
+    {
+      "name": "Z正则_校验用户名",
+      "calls": 1,
+      "files": 1,
+      "ctx": "Z正则_校验用户名("
+    },
+    {
+      "name": "ToId",
+      "calls": 1,
+      "files": 1,
+      "ctx": "ToId{...}"
+    }
+  ]
+}

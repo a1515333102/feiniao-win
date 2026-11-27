@@ -1,0 +1,26 @@
+{
+  "captcha": {
+    "img-height": 80,
+    "img-width": 240,
+    "key-long": 4,
+    "open-captcha": 1,
+    "open-captcha-timeout": 3600,
+    "type": 1
+  },
+  "mysql": {
+    "config": "",
+    "dbname": "",
+    "logmode": "error",
+    "maxidleconns": 10,
+    "maxopenconns": 100,
+    "path": "",
+    "port": "3306",
+    "prefix": "",
+    "singular": false,
+    "username": ""
+  },
+  "port": 18888,
+  "代理入口": "Agent",
+  "管理入口": "Admin",
+  "系统模式": 0
+}

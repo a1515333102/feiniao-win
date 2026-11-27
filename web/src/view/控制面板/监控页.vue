@@ -1,0 +1,2824 @@
+<template>
+  <div class="monitor-page" v-loading="loading">
+    <el-card class="toolbar-card" shadow="never">
+      <div class="toolbar-row">
+        <div class="toolbar-left">
+          <div class="title-block">
+            <h2>运行监控</h2>
+            <p>轻量指标常驻采集，CPU / block / mutex 按需抓样，数据库死锁和慢 SQL 单独展示。</p>
+          </div>
+          <el-tag type="info">最近刷新：{{ lastRefreshText }}</el-tag>
+        </div>
+        <div class="toolbar-actions">
+          <el-switch v-model="autoRefresh" active-text="自动刷新" inactive-text="手动刷新" />
+          <el-input-number v-model="autoRefreshSeconds" :min="5" :max="60" :step="5" size="small" />
+          <el-button :icon="RefreshRight" @click="handleManualRefresh">刷新</el-button>
+          <el-button :icon="SwitchButton" type="danger" plain @click="stopSystem">停止系统</el-button>
+        </div>
+      </div>
+    </el-card>
+
+    <section class="monitor-kpi-grid" aria-label="核心运行指标">
+      <article v-for="item in kpis" :key="item.key" class="monitor-card metric-card">
+        <div class="metric-card__icon" :class="`is-${item.level}`">
+          <el-icon><component :is="item.icon" /></el-icon>
+        </div>
+        <div class="metric-card__content">
+          <div class="metric-card__label">{{ item.label }}</div>
+          <div class="metric-card__value">{{ item.value }}<span>{{ item.unit }}</span></div>
+          <div class="metric-card__meta">{{ item.meta }}</div>
+        </div>
+      </article>
+    </section>
+
+    <section class="monitor-chart-grid">
+      <el-card class="monitor-card" shadow="never">
+        <RuntimeTrendChart
+          title="CPU 趋势"
+          unit="%"
+          :points="history"
+          :series="[{ key: 'hostCpu', name: '主机平均' }, { key: 'processCpu', name: '当前进程' }]"
+        />
+      </el-card>
+      <el-card class="monitor-card" shadow="never">
+        <RuntimeTrendChart
+          title="内存趋势"
+          unit="MB"
+          :points="history"
+          :series="[{ key: 'rssMb', name: '进程 RSS' }, { key: 'heapMb', name: 'Go Heap' }]"
+        />
+      </el-card>
+      <el-card class="monitor-card" shadow="never">
+        <RuntimeTrendChart
+          title="协程与 GC"
+          unit="数量"
+          :points="history"
+          :series="[{ key: 'goroutines', name: 'goroutine' }, { key: 'gcCount', name: 'GC 次数' }]"
+        />
+      </el-card>
+      <el-card class="monitor-card resource-panel" shadow="never">
+        <template #header>
+          <div class="section-title">基础资源</div>
+        </template>
+        <div class="resource-grid">
+          <div class="resource-row"><span>系统 / 架构</span><strong>{{ serverOs.goos || '-' }} / {{ serverOs.compiler || '-' }}</strong></div>
+          <div class="resource-row"><span>Go 版本</span><strong>{{ serverOs.goVersion || '-' }}</strong></div>
+          <div class="resource-row"><span>进程 PID</span><strong>{{ processInfo.pid || '-' }}</strong></div>
+          <div class="resource-row"><span>运行时长</span><strong>{{ formatSeconds(runtimeInfo.uptimeSeconds) }}</strong></div>
+          <div class="resource-progress">
+            <div><span>主机内存</span><strong>{{ serverRam.usedMb || 0 }} / {{ serverRam.totalMb || 0 }} MB</strong></div>
+            <el-progress :percentage="Number(serverRam.usedPercent || 0)" :stroke-width="8" />
+          </div>
+          <div class="resource-progress">
+            <div><span>磁盘</span><strong>{{ serverDisk.usedGb || 0 }} / {{ serverDisk.totalGb || 0 }} GB</strong></div>
+            <el-progress :percentage="Number(serverDisk.usedPercent || 0)" :stroke-width="8" status="warning" />
+          </div>
+        </div>
+      </el-card>
+    </section>
+
+    <el-row :gutter="16" class="content-grid">
+      <el-col :xs="24" :xl="8">
+        <el-card class="panel-card alert-card">
+          <template #header>
+            <div class="card-header">
+              <span>监控告警</span>
+              <el-tag :type="alertBadgeType" size="small">{{ alertBadgeText }}</el-tag>
+            </div>
+          </template>
+          <div class="alert-list">
+            <el-alert
+              v-for="(item, index) in alertRows"
+              :key="`${item.title}-${index}`"
+              :type="item.level"
+              :closable="false"
+              :title="item.title"
+              class="monitor-alert"
+            >
+              <template #default>
+                <div class="alert-detail">{{ item.detail }}</div>
+              </template>
+            </el-alert>
+          </div>
+          <el-empty
+            v-if="alertRows.length === 0"
+            :image-size="64"
+            description="暂无告警"
+            class="monitor-empty"
+          />
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :xl="16">
+        <el-card class="panel-card">
+          <template #header>
+            <div class="card-header">
+              <span>路由趋势</span>
+              <div class="header-tools">
+                <el-select v-model="routeTrendKey" class="route-trend-route">
+                  <el-option v-for="item in routeTrendOptions" :key="item.key" :label="item.label" :value="item.key" />
+                </el-select>
+                <el-select v-model="routeTrendMetric" class="route-trend-metric">
+                  <el-option label="请求次数" value="count" />
+                  <el-option label="错误次数" value="errorCount" />
+                  <el-option label="平均耗时" value="avgMs" />
+                  <el-option label="P95" value="p95Ms" />
+                </el-select>
+                <el-select v-model="routeTrendRange" class="route-trend-range">
+                  <el-option label="近 5 分钟" value="5m" />
+                  <el-option label="近 15 分钟" value="15m" />
+                  <el-option label="近 1 小时" value="1h" />
+                </el-select>
+              </div>
+            </div>
+          </template>
+          <el-alert
+            type="info"
+            :closable="false"
+            title="每 10 秒采样一次，适合看某个功能是持续变慢还是偶发抖动。"
+            class="hint-alert"
+          />
+          <div ref="routeTrendChartRef" class="route-trend-chart"></div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="16" class="content-grid">
+      <el-col :xs="24">
+        <el-card class="panel-card">
+          <template #header>
+            <div class="card-header">
+              <span>进程占用 Top 10</span>
+              <div class="header-tools">
+                <el-tag type="info">仅手动刷新</el-tag>
+                <el-tag type="info">最近采集：{{ processCollectedAtText }}</el-tag>
+                <el-button :icon="RefreshRight" :loading="processLoading" @click="loadProcessTop">刷新进程排行</el-button>
+              </div>
+            </div>
+          </template>
+          <el-alert
+            type="info"
+            :closable="false"
+            title="按约 0.8 秒采样窗口统计，已自动排除当前后端进程，避免刷新动作把自己顶到第一位。CPU 100% 大致表示占满 1 个核心。"
+            class="hint-alert"
+          />
+          <el-table :data="processRows" size="small" max-height="320" stripe>
+            <el-table-column prop="pid" label="PID" width="90" />
+            <el-table-column prop="name" label="进程名" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="cpuPercent" label="CPU%" width="100" />
+            <el-table-column prop="memoryMb" label="内存(MB)" width="110" />
+            <el-table-column prop="memoryPercent" label="内存占比%" width="110" />
+            <el-table-column prop="threadCount" label="线程数" width="90" />
+            <el-table-column prop="status" label="状态" width="110" show-overflow-tooltip />
+            <el-table-column prop="uptimeText" label="已运行" width="110" />
+            <el-table-column prop="startedAt" label="启动时间" min-width="180" />
+            <el-table-column prop="command" label="命令行" min-width="320" show-overflow-tooltip />
+          </el-table>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="16" class="content-grid">
+      <el-col :xs="24" :xl="15">
+        <el-card class="panel-card">
+          <template #header>
+            <div class="card-header">
+              <span>路由热点</span>
+              <div class="header-tools">
+                <el-input v-model="routeKeyword" placeholder="筛选路由 / 方法" clearable class="route-filter" />
+                <el-select v-model="routeSort" class="route-sort">
+                  <el-option label="总耗时" value="totalMs" />
+                  <el-option label="P95" value="p95Ms" />
+                  <el-option label="最大耗时" value="maxMs" />
+                  <el-option label="请求次数" value="count" />
+                </el-select>
+              </div>
+            </div>
+          </template>
+          <el-alert
+            type="info"
+            :closable="false"
+            title="这张表用来快速定位哪个功能最重。精确 CPU / 内存归因，请继续看下方 CPU 或 heap profile。"
+            class="hint-alert"
+          />
+          <el-table :data="filteredRoutes" max-height="460" stripe>
+            <el-table-column prop="method" label="方法" width="90" />
+            <el-table-column prop="route" label="路由" min-width="260" show-overflow-tooltip />
+            <el-table-column prop="count" label="次数" width="90" />
+            <el-table-column prop="inFlight" label="进行中" width="90" />
+            <el-table-column prop="avgMs" label="平均(ms)" width="110" />
+            <el-table-column prop="p95Ms" label="P95(ms)" width="110" />
+            <el-table-column prop="maxMs" label="最大(ms)" width="110" />
+            <el-table-column prop="totalMs" label="总耗时(ms)" width="120" />
+            <el-table-column prop="errorCount" label="错误" width="80" />
+            <el-table-column prop="panicCount" label="Panic" width="80" />
+            <el-table-column prop="lastSeenAt" label="最后请求" min-width="180" />
+          </el-table>
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :xl="9">
+        <el-card class="panel-card req-card">
+          <template #header>
+            <div class="card-header">
+              <span>活动请求 / 慢请求</span>
+              <div class="header-tools">
+                <el-tag type="warning" size="small">活动 {{ activeRequests.length }}</el-tag>
+                <el-tag type="danger" size="small">慢 {{ slowRequests.length }}</el-tag>
+                <el-tag type="info" size="small">Panic {{ panicEvents.length }}</el-tag>
+              </div>
+            </div>
+          </template>
+          <el-descriptions :column="3" border size="small" class="mini-desc">
+            <el-descriptions-item label="进行中">{{ activeRequests.length }}</el-descriptions-item>
+            <el-descriptions-item label="慢请求">{{ slowRequests.length }}</el-descriptions-item>
+            <el-descriptions-item label="Panic">{{ panicEvents.length }}</el-descriptions-item>
+          </el-descriptions>
+
+          <div class="sub-block first-sub-block">
+            <div class="sub-title">当前活动请求</div>
+            <el-table :data="activeRequests" max-height="180" size="small" stripe>
+              <el-table-column prop="method" label="方法" width="80" />
+              <el-table-column prop="route" label="路由" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="currentDurationMs" label="耗时(ms)" width="110" />
+            </el-table>
+            <el-empty
+              v-if="activeRequests.length === 0"
+              :image-size="48"
+              description="无进行中请求"
+              class="monitor-empty-sm"
+            />
+          </div>
+
+          <div class="sub-block">
+            <div class="sub-title">最近慢请求</div>
+            <el-table :data="slowRequests" max-height="180" size="small" stripe>
+              <el-table-column prop="method" label="方法" width="80" />
+              <el-table-column prop="route" label="路由" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="status" label="状态" width="80" />
+              <el-table-column prop="durationMs" label="耗时(ms)" width="110" />
+            </el-table>
+            <el-empty
+              v-if="slowRequests.length === 0"
+              :image-size="48"
+              description="暂无慢请求"
+              class="monitor-empty-sm"
+            />
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="16" class="content-grid">
+      <el-col :xs="24">
+        <el-card class="panel-card">
+          <template #header>
+            <div class="card-header">
+              <span>数据库死锁 / 慢 SQL</span>
+              <div class="header-tools">
+                <el-tag :type="databaseInfo.enabled ? 'success' : 'info'">
+                  {{ databaseInfo.enabled ? '已连接' : '未连接数据库' }}
+                </el-tag>
+                <el-button
+                  type="primary"
+                  :icon="VideoPlay"
+                  :loading="mysqlDiagLoading"
+                  @click="loadMySQLDiag"
+                >MySQL 诊断</el-button>
+              </div>
+            </div>
+          </template>
+
+          <el-row :gutter="16">
+            <el-col :xs="24" :xl="7">
+              <el-descriptions :column="1" border size="small" class="mini-desc">
+                <el-descriptions-item label="慢 SQL 阈值">
+                  {{ Number(databaseInfo.slowThresholdMs || 0).toFixed(0) }} ms
+                </el-descriptions-item>
+                <el-descriptions-item label="Open / InUse / Idle">
+                  {{ dbPool.openConnections || 0 }} / {{ dbPool.inUse || 0 }} / {{ dbPool.idle || 0 }}
+                </el-descriptions-item>
+                <el-descriptions-item label="WaitCount">{{ dbPool.waitCount || 0 }}</el-descriptions-item>
+                <el-descriptions-item label="WaitDuration">{{ ms(dbPool.waitDurationMs) }}</el-descriptions-item>
+                <el-descriptions-item label="LifetimeClosed">{{ dbPool.maxLifetimeClosed || 0 }}</el-descriptions-item>
+              </el-descriptions>
+              <el-alert
+                type="warning"
+                :closable="false"
+                title="MySQL 1213 通常表示死锁，1205 通常表示锁等待超时。下面会把这两类错误单独标出来。"
+                class="hint-alert"
+              />
+            </el-col>
+            <el-col :xs="24" :xl="17">
+              <div class="sub-block first-sub-block">
+                <div class="sub-title">最近慢 SQL</div>
+                <el-table :data="slowSqlRows" size="small" max-height="220" stripe>
+                  <el-table-column prop="at" label="时间" width="180" />
+                  <el-table-column prop="durationMs" label="耗时(ms)" width="110" />
+                  <el-table-column prop="rowsAffected" label="影响行" width="100" />
+                  <el-table-column prop="sql" label="SQL" min-width="480" show-overflow-tooltip />
+                </el-table>
+              </div>
+              <div class="sub-block">
+                <div class="sub-title">SQL 模板排行</div>
+                <el-table :data="sqlTemplateRows" size="small" max-height="220" stripe>
+                  <el-table-column prop="template" label="模板" min-width="420" show-overflow-tooltip />
+                  <el-table-column prop="count" label="次数" width="90" />
+                  <el-table-column prop="avgMs" label="平均(ms)" width="100" />
+                  <el-table-column prop="maxMs" label="最大(ms)" width="100" />
+                  <el-table-column prop="deadlockCount" label="死锁" width="80" />
+                  <el-table-column prop="lastAt" label="最近时间" width="180" />
+                </el-table>
+              </div>
+              <div class="sub-block">
+                <div class="sub-title">最近 SQL 错误 / 死锁</div>
+                <el-table :data="dbErrorRows" size="small" max-height="220" stripe>
+                  <el-table-column prop="at" label="时间" width="180" />
+                  <el-table-column prop="deadlock" label="死锁/锁等待" width="110">
+                    <template #default="{ row }">
+                      <el-tag :type="row.deadlock ? 'danger' : 'warning'">
+                        {{ row.deadlock ? '是' : '否' }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="durationMs" label="耗时(ms)" width="110" />
+                  <el-table-column prop="error" label="错误" min-width="220" show-overflow-tooltip />
+                  <el-table-column prop="sql" label="SQL" min-width="360" show-overflow-tooltip />
+                </el-table>
+              </div>
+            </el-col>
+          </el-row>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row v-if="mysqlDiag" :gutter="16" class="content-grid">
+      <el-col :xs="24">
+        <el-card class="panel-card">
+          <template #header>
+            <div class="card-header">
+              <span>MySQL 诊断结果</span>
+              <div class="header-tools">
+                <el-tag :type="mysqlDiag.success ? 'success' : 'warning'">
+                  {{ mysqlDiag.success ? '诊断成功' : '部分失败' }}
+                </el-tag>
+                <el-tag type="info">最近诊断：{{ mysqlDiagCollectedAtText }}</el-tag>
+                <el-button :icon="RefreshRight" :loading="mysqlDiagLoading" @click="loadMySQLDiag">重新诊断</el-button>
+              </div>
+            </div>
+          </template>
+
+          <el-alert
+            v-for="(item, index) in mysqlDiag.notes || []"
+            :key="`mysql-diag-note-${index}`"
+            type="info"
+            :closable="false"
+            :title="item"
+            class="hint-alert"
+          />
+
+          <el-descriptions :column="4" border size="small" class="mini-desc">
+            <el-descriptions-item label="进程总数">{{ mysqlDiag.processCount || 0 }}</el-descriptions-item>
+            <el-descriptions-item label="Sleep 进程">{{ mysqlDiag.sleepProcessCount || 0 }}</el-descriptions-item>
+            <el-descriptions-item label="活跃进程">{{ mysqlDiag.activeProcessCount || 0 }}</el-descriptions-item>
+            <el-descriptions-item label="最长 Sleep(s)">{{ mysqlDiag.maxSleepSeconds || 0 }}</el-descriptions-item>
+            <el-descriptions-item label="慢日志状态">
+              <el-tag :type="mysqlDiag.slowQueryLogStatus === 'ON' ? 'success' : 'info'" size="small">
+                {{ mysqlDiag.slowQueryLogStatus || '-' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="慢查询阈值(s)">{{ mysqlDiag.longQueryTime || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="慢日志文件" :span="2">
+              <code class="mysql-slow-log-path">{{ mysqlDiag.slowQueryLogFile || '-' }}</code>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <div class="sub-block first-sub-block">
+            <div class="sub-title">当前进程列表 (SHOW FULL PROCESSLIST)</div>
+            <el-table :data="mysqlDiag.processList || []" size="small" max-height="320" stripe>
+              <el-table-column prop="id" label="Id" width="80" />
+              <el-table-column prop="user" label="User" width="100" />
+              <el-table-column prop="host" label="Host" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="db" label="db" width="100" show-overflow-tooltip />
+              <el-table-column prop="command" label="Command" width="110">
+                <template #default="{ row }">
+                  <el-tag :type="row.command === 'Sleep' ? 'info' : 'warning'" size="small">
+                    {{ row.command }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="time" label="Time(s)" width="90" sortable>
+                <template #default="{ row }">
+                  <span :class="`mysql-time-${row.level}`">{{ row.time }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="state" label="State" min-width="160" show-overflow-tooltip />
+              <el-table-column prop="info" label="Info" min-width="420" show-overflow-tooltip />
+            </el-table>
+          </div>
+
+          <div class="sub-block">
+            <div class="sub-title">SQL 摘要 Top 10 (performance_schema, 按累计耗时排序)</div>
+            <el-alert
+              type="info"
+              :closable="false"
+              title="计时已从皮秒换算为毫秒。红色表示单次超过 1 秒或累计超过 10 秒；扫描/发送比值过大说明查询效率低。"
+              class="hint-alert"
+            />
+            <el-table :data="mysqlDiag.statementSummary || []" size="small" max-height="460" stripe>
+              <el-table-column prop="schemaName" label="Schema" width="100" show-overflow-tooltip />
+              <el-table-column prop="digestText" label="SQL 模板" min-width="360" show-overflow-tooltip />
+              <el-table-column prop="countStar" label="执行次数" width="100" sortable />
+              <el-table-column prop="sumTimerMs" label="累计(ms)" width="110" sortable>
+                <template #default="{ row }">
+                  <span :class="`mysql-time-${row.level}`">{{ formatDiagNumber(row.sumTimerMs) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="avgTimerMs" label="平均(ms)" width="100" sortable>
+                <template #default="{ row }">{{ formatDiagNumber(row.avgTimerMs) }}</template>
+              </el-table-column>
+              <el-table-column prop="maxTimerMs" label="最大(ms)" width="100" sortable>
+                <template #default="{ row }">
+                  <span :class="`mysql-time-${row.level}`">{{ formatDiagNumber(row.maxTimerMs) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="sumRowsExamined" label="扫描行" width="100" sortable />
+              <el-table-column prop="sumRowsSent" label="发送行" width="100" sortable />
+              <el-table-column prop="sumTmpDiskTables" label="磁盘临时表" width="110" sortable>
+                <template #default="{ row }">
+                  <el-tag v-if="row.sumTmpDiskTables > 0" type="danger" size="small">{{ row.sumTmpDiskTables }}</el-tag>
+                  <span v-else>0</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="sumNoIndexUsed" label="无索引" width="90" sortable>
+                <template #default="{ row }">
+                  <el-tag v-if="row.sumNoIndexUsed > 0" type="warning" size="small">{{ row.sumNoIndexUsed }}</el-tag>
+                  <span v-else>0</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="lastSeen" label="最近执行" min-width="160" />
+              <el-table-column prop="advice" label="诊断建议" min-width="280" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <el-tag :type="row.level === 'danger' ? 'danger' : row.level === 'warning' ? 'warning' : 'success'" size="small">
+                    {{ row.level === 'danger' ? '高危' : row.level === 'warning' ? '关注' : '正常' }}
+                  </el-tag>
+                  <span class="mysql-advice">{{ row.advice }}</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="16" class="content-grid">
+      <el-col :xs="24" :xl="12">
+        <el-card class="panel-card panic-card">
+          <template #header>
+            <div class="card-header">
+              <span>异常 / 死锁线索</span>
+              <div class="header-tools">
+                <el-tag type="danger" size="small">Panic {{ panicEvents.length }}</el-tag>
+                <el-tag type="warning" size="small">SQL错误 {{ dbErrorRows.length }}</el-tag>
+                <el-tag :type="databaseInfo.enabled ? 'success' : 'info'" size="small">
+                  {{ databaseInfo.enabled ? 'DB已连' : 'DB未连' }}
+                </el-tag>
+              </div>
+            </div>
+          </template>
+          <el-alert
+            type="warning"
+            :closable="false"
+            title="如果遇到卡死或死锁，先看活动请求、慢请求、慢 SQL，再看 goroutine / block / mutex profile。"
+            class="hint-alert"
+          />
+
+          <div class="sub-block first-sub-block">
+            <div class="sub-title">最近 SQL 错误 / 死锁</div>
+            <el-table :data="dbErrorRows" size="small" max-height="180" stripe>
+              <el-table-column prop="at" label="时间" width="160" />
+              <el-table-column prop="deadlock" label="死锁" width="70">
+                <template #default="{ row }">
+                  <el-tag :type="row.deadlock ? 'danger' : 'warning'" size="small">
+                    {{ row.deadlock ? '是' : '否' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="durationMs" label="耗时(ms)" width="100" />
+              <el-table-column prop="error" label="错误" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="sql" label="SQL" min-width="260" show-overflow-tooltip />
+            </el-table>
+            <el-empty
+              v-if="dbErrorRows.length === 0"
+              :image-size="48"
+              description="暂无 SQL 错误 / 死锁"
+              class="monitor-empty-sm"
+            />
+          </div>
+
+          <div class="sub-block">
+            <div class="sub-title">Panic 异常堆栈</div>
+            <el-collapse v-if="panicEvents.length > 0">
+              <el-collapse-item
+                v-for="(item, index) in panicEvents"
+                :key="`${item.createdAt}-${index}`"
+                :title="`${item.createdAt} | ${item.method} ${item.route || item.path}`"
+                :name="index"
+              >
+                <div class="panic-meta">
+                  <div>来源 IP：{{ item.clientIp || '-' }}</div>
+                  <div>Query：{{ item.query || '-' }}</div>
+                  <div>错误：{{ item.error }}</div>
+                </div>
+                <pre class="stack-box">{{ item.stack }}</pre>
+              </el-collapse-item>
+            </el-collapse>
+            <el-empty
+              v-else
+              :image-size="48"
+              description="暂无 Panic 异常"
+              class="monitor-empty-sm"
+            />
+          </div>
+        </el-card>
+      </el-col>
+
+      <el-col :xs="24" :xl="12">
+        <el-card class="panel-card">
+          <template #header>pprof 开关与抓样</template>
+          <div class="settings-grid">
+            <div class="setting-item">
+              <div class="setting-top">
+                <div>
+                  <div class="setting-title">阻塞等待采样</div>
+                  <div class="setting-help">建议按需开启。`1000000` 表示按 1ms 阻塞时间采样。</div>
+                </div>
+                <div class="setting-toggle">
+                  <el-switch v-model="settingForm.enableBlockProfile" size="small" />
+                  <el-tag :type="settingForm.enableBlockProfile ? 'success' : 'info'" size="small">
+                    {{ settingForm.enableBlockProfile ? '已开启' : '已关闭' }}
+                  </el-tag>
+                </div>
+              </div>
+              <div class="setting-input-row">
+                <span class="setting-input-label">采样速率</span>
+                <el-input-number v-model="settingForm.blockProfileRate" :min="0" :step="100000" />
+              </div>
+            </div>
+
+            <div class="setting-item">
+              <div class="setting-top">
+                <div>
+                  <div class="setting-title">锁竞争采样</div>
+                  <div class="setting-help">`5` 表示大约采样五分之一的锁竞争事件。</div>
+                </div>
+                <div class="setting-toggle">
+                  <el-switch v-model="settingForm.enableMutexProfile" size="small" />
+                  <el-tag :type="settingForm.enableMutexProfile ? 'success' : 'info'" size="small">
+                    {{ settingForm.enableMutexProfile ? '已开启' : '已关闭' }}
+                  </el-tag>
+                </div>
+              </div>
+              <div class="setting-input-row">
+                <span class="setting-input-label">采样比例</span>
+                <el-input-number v-model="settingForm.mutexFraction" :min="0" :step="1" />
+              </div>
+            </div>
+
+            <div class="setting-actions">
+              <el-button type="primary" @click="saveSettings">保存采样设置</el-button>
+            </div>
+          </div>
+
+          <el-divider />
+
+          <div class="cpu-capture">
+            <div class="cpu-toolbar">
+              <div>
+                <div class="sub-title">CPU 抓样</div>
+                <div class="setting-help">复现高 CPU 功能时点击抓样，页面会等待采样结束后返回热点函数。</div>
+              </div>
+              <div class="cpu-actions">
+                <el-input-number v-model="cpuForm.seconds" :min="5" :max="60" :step="5" />
+                <el-button type="primary" :icon="VideoPlay" :loading="cpuLoading" @click="runCpuCapture">抓 CPU</el-button>
+                <el-button :icon="Download" @click="downloadCpuRaw">下载最近 CPU Profile</el-button>
+              </div>
+            </div>
+            <el-table :data="cpuTopRows" size="small" max-height="240" stripe>
+              <el-table-column prop="function" label="函数" min-width="260" show-overflow-tooltip />
+              <el-table-column prop="flatMs" label="Flat(ms)" width="100" />
+              <el-table-column prop="flatPercent" label="Flat%" width="90" />
+              <el-table-column prop="cumulativeMs" label="Cum(ms)" width="100" />
+              <el-table-column prop="cumulativePercent" label="Cum%" width="90" />
+            </el-table>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-card class="panel-card profile-card">
+      <template #header>
+        <div class="card-header">
+          <span>pprof 文本查看</span>
+          <div class="header-tools">
+            <el-select v-model="profileForm.name" class="profile-select">
+              <el-option
+                v-for="item in profileOptions"
+                :key="item.name"
+                :label="`${item.name}${item.manualToggle ? ' / 手动开关' : ''}`"
+                :value="item.name"
+              />
+            </el-select>
+            <el-select v-model="profileForm.debug" class="profile-select">
+              <el-option label="debug=1" :value="1" />
+              <el-option label="debug=2" :value="2" />
+            </el-select>
+            <el-switch v-model="profileForm.gc" active-text="heap 前先 GC" inactive-text="直接抓取" />
+            <el-button :icon="RefreshRight" :loading="profileLoading" @click="loadProfileText">读取文本</el-button>
+            <el-button :icon="Download" @click="downloadProfileRaw">下载原始文件</el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-row :gutter="16">
+        <el-col :xs="24" :xl="7">
+          <el-table :data="profileOptions" size="small" stripe>
+            <el-table-column prop="name" label="Profile" width="140" />
+            <el-table-column prop="enabled" label="已开启" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.enabled ? 'success' : 'info'">
+                  {{ row.enabled ? '是' : '否' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="count" label="Count" width="90" />
+            <el-table-column prop="description" label="说明" min-width="180" show-overflow-tooltip />
+          </el-table>
+          <ul class="notes-list">
+            <li v-for="(item, index) in notes" :key="index">{{ item }}</li>
+          </ul>
+        </el-col>
+
+        <el-col :xs="24" :xl="17">
+          <div class="profile-meta">
+            <span>抓取时间：{{ profileMeta.collectedAt || '-' }}</span>
+            <el-tag v-if="profileMeta.truncated" type="warning">文本已截断</el-tag>
+          </div>
+
+          <div v-if="profileReadableSummary" class="readable-summary">
+            <el-alert
+              :closable="false"
+              :type="profileReadableSummary.level || 'success'"
+              :title="profileReadableSummary.summaryText"
+              class="hint-alert"
+            />
+            <el-descriptions :column="2" border size="small" class="mini-desc readable-desc">
+              <el-descriptions-item
+                v-for="item in profileReadableSummary.metricItems || []"
+                :key="item.label"
+                :label="item.label"
+              >
+                {{ item.value }}
+              </el-descriptions-item>
+            </el-descriptions>
+            <el-table :data="profileReadableSummary.groups" size="small" stripe class="readable-table">
+              <el-table-column prop="count" label="数量" width="70" />
+              <el-table-column prop="valueText" label="核心数值" width="170" show-overflow-tooltip />
+              <el-table-column label="类型" width="140">
+                <template #default="{ row }">
+                  <el-tag :type="row.levelTag">
+                    {{ row.title }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="detail" label="人话说明" min-width="240" show-overflow-tooltip />
+              <el-table-column prop="featureText" label="可能关联功能" min-width="220" show-overflow-tooltip />
+              <el-table-column prop="locationText" label="关键位置" min-width="180" show-overflow-tooltip />
+            </el-table>
+
+            <!-- goroutine 状态分布 -->
+            <div v-if="goroutineStates" class="goroutine-states">
+              <div class="sub-title">goroutine 状态分布</div>
+              <div class="gs-grid">
+                <div v-for="s in goroutineStates.states" :key="s.state" class="gs-item">
+                  <div class="gs-label">
+                    <span class="gs-dot" :style="{ background: stateColor(s.state) }"></span>
+                    <span>{{ s.state }}</span>
+                  </div>
+                  <div class="gs-bar-wrap">
+                    <div class="gs-bar" :style="{ width: s.percent + '%', background: stateColor(s.state) }"></div>
+                    <span class="gs-value">{{ s.count }} ({{ s.percent }}%)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sub-title raw-profile-title">原始文本</div>
+          <pre class="profile-box">{{ profileText || '请选择 profile 后点击“读取文本”。' }}</pre>
+        </el-col>
+      </el-row>
+    </el-card>
+
+    <AiHelp :context="aiContext" />
+  </div>
+</template>
+
+<script setup>
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Download, RefreshRight, SwitchButton, VideoPlay } from '@element-plus/icons-vue'
+import * as echarts from 'echarts'
+import * as monitorApi from '@/api/监控页'
+import RuntimeTrendChart from './组件/运行趋势图.vue'
+import AiHelp from './组件/监控页Ai助手.vue'
+
+const createOverview = () => ({
+  server: {
+    os: {},
+    cpu: { cpus: [] },
+    ram: {},
+    disk: {}
+  },
+  runtime: {},
+  database: {},
+  routes: [],
+  routeTrends: [],
+  activeRequests: [],
+  slowRequests: [],
+  panicEvents: [],
+  alerts: [],
+  pprof: {
+    profiles: [],
+    lastCpuTop: []
+  },
+  notes: []
+})
+
+const createProcessSnapshot = () => ({
+  collectedAt: '',
+  processes: []
+})
+
+const normalizeOverview = (data = {}) => {
+  const base = createOverview()
+  return {
+    ...base,
+    ...data,
+    server: {
+      ...base.server,
+      ...(data.server || {}),
+      os: { ...(data.server?.os || {}) },
+      cpu: { cpus: [], ...(data.server?.cpu || {}) },
+      ram: { ...(data.server?.ram || {}) },
+      disk: { ...(data.server?.disk || {}) }
+    },
+    runtime: { ...(data.runtime || {}) },
+    database: { ...(data.database || {}) },
+    routes: data.routes || [],
+    routeTrends: data.routeTrends || [],
+    activeRequests: data.activeRequests || [],
+    slowRequests: data.slowRequests || [],
+    panicEvents: data.panicEvents || [],
+    alerts: data.alerts || [],
+    pprof: {
+      ...base.pprof,
+      ...(data.pprof || {}),
+      profiles: data.pprof?.profiles || [],
+      lastCpuTop: data.pprof?.lastCpuTop || []
+    },
+    notes: data.notes || []
+  }
+}
+
+const loading = ref(false)
+const profileLoading = ref(false)
+const cpuLoading = ref(false)
+const processLoading = ref(false)
+const mysqlDiagLoading = ref(false)
+const mysqlDiag = ref(null)
+const autoRefresh = ref(true)
+const autoRefreshSeconds = ref(5)
+const timer = ref(null)
+const lastRefreshAt = ref('')
+const overview = ref(createOverview())
+const processSnapshot = ref(createProcessSnapshot())
+const history = ref([])
+const HISTORY_WINDOW_MS = 30 * 60 * 1000
+
+const routeKeyword = ref('')
+const routeSort = ref('totalMs')
+const profileText = ref('')
+const profileMeta = ref({
+  collectedAt: '',
+  truncated: false
+})
+const settingForm = ref({
+  enableBlockProfile: false,
+  blockProfileRate: 1000000,
+  enableMutexProfile: false,
+  mutexFraction: 5
+})
+const cpuForm = ref({
+  seconds: 10
+})
+const profileForm = ref({
+  name: 'goroutine',
+  debug: 1,
+  gc: false
+})
+
+const routeTrendChartRef = ref(null)
+let routeTrendChart = null
+const routeTrendKey = ref('')
+const routeTrendMetric = ref('p95Ms')
+const routeTrendRange = ref('15m')
+
+const serverOs = computed(() => overview.value.server?.os || {})
+const serverCpu = computed(() => overview.value.server?.cpu || { cpus: [] })
+const serverRam = computed(() => overview.value.server?.ram || {})
+const serverDisk = computed(() => overview.value.server?.disk || {})
+const runtimeInfo = computed(() => overview.value.runtime || {})
+const databaseInfo = computed(() => overview.value.database || {})
+const dbPool = computed(() => databaseInfo.value.pool || {})
+const slowSqlRows = computed(() => databaseInfo.value.slowSqls || [])
+const dbErrorRows = computed(() => databaseInfo.value.errors || [])
+const sqlTemplateRows = computed(() => databaseInfo.value.sqlTemplates || [])
+const activeRequests = computed(() => overview.value.activeRequests || [])
+const slowRequests = computed(() => overview.value.slowRequests || [])
+const panicEvents = computed(() => overview.value.panicEvents || [])
+const profileOptions = computed(() => overview.value.pprof?.profiles || [])
+const notes = computed(() => overview.value.notes || [])
+const cpuTopRows = computed(() => overview.value.pprof?.lastCpuTop || [])
+const lastRefreshText = computed(() => lastRefreshAt.value || '未刷新')
+const processCollectedAtText = computed(() => processSnapshot.value.collectedAt || '未采集')
+const mysqlDiagCollectedAtText = computed(() => mysqlDiag.value?.collectedAt || '未诊断')
+const currentProcess = computed(() => processRows.value[0] || {})
+const processInfo = computed(() => currentProcess.value)
+const processRows = computed(() => {
+  return (processSnapshot.value.processes || []).map((item) => ({
+    ...item,
+    cpuPercent: Number(item.cpuPercent || 0).toFixed(2),
+    memoryMb: Number(item.memoryMb || 0).toFixed(2),
+    memoryPercent: Number(item.memoryPercent || 0).toFixed(2),
+    vmsMb: Number(item.vmsMb || 0).toFixed(2),
+    uptimeText: formatSeconds(item.uptimeSeconds || 0),
+    command: item.command || '-'
+  }))
+})
+const hostCpuAverage = computed(() => {
+  const values = serverCpu.value.cpus || []
+  if (!values.length) {
+    return 0
+  }
+  return values.reduce((sum, value) => sum + Number(value || 0), 0) / values.length
+})
+const kpis = computed(() => [
+  {
+    key: 'processCpu',
+    label: '进程 CPU',
+    value: formatNumber(currentProcess.value.cpuPercent),
+    unit: '%',
+    meta: `单核口径 ${formatNumber(Number(currentProcess.value.cpuPercent || 0) * (serverOs.value.numCpu || 1))}%`,
+    level: metricLevel(currentProcess.value.cpuPercent, 70, 90)
+  },
+  {
+    key: 'rss',
+    label: '进程 RSS',
+    value: formatNumber(currentProcess.value.memoryMb),
+    unit: 'MB',
+    meta: `VMS ${formatNumber(currentProcess.value.vmsMb || currentProcess.value.memoryMb)} MB`,
+    level: 'normal'
+  },
+  {
+    key: 'heap',
+    label: 'Go Heap',
+    value: formatNumber(runtimeInfo.value.heapAllocMb),
+    unit: 'MB',
+    meta: `${formatNumber(runtimeInfo.value.heapObjects, 0)} 个对象`,
+    level: 'normal'
+  },
+  {
+    key: 'goroutines',
+    label: 'goroutine',
+    value: formatNumber(runtimeInfo.value.goroutines, 0),
+    unit: '个',
+    meta: `栈 ${formatNumber(runtimeInfo.value.stackInuseMb)} MB`,
+    level: 'normal'
+  },
+  {
+    key: 'gc',
+    label: '最近 GC 暂停',
+    value: formatNumber(runtimeInfo.value.lastGcPauseMs, 3),
+    unit: 'ms',
+    meta: `累计 ${formatNumber(runtimeInfo.value.numGc || 0, 0)} 次`,
+    level: metricLevel(runtimeInfo.value.lastGcPauseMs, 10, 50)
+  },
+  {
+    key: 'mutex',
+    label: '互斥锁等待',
+    value: formatNumber(runtimeInfo.value.mutexWaitSeconds, 2),
+    unit: 's',
+    meta: `${formatNumber(runtimeInfo.value.mutexProfileRecords || 0, 0)} 条采样记录`,
+    level: 'normal'
+  }
+])
+const historyPoints = computed(() => history.value)
+const alertRows = computed(() => {
+  const list = overview.value.alerts || []
+  if (list.length > 0) {
+    return list
+  }
+  return [
+    {
+      level: 'success',
+      title: '当前没有重点告警',
+      detail: 'CPU、内存、磁盘、慢请求和数据库死锁都还在安全范围内。'
+    }
+  ]
+})
+const alertBadgeType = computed(() => {
+  const list = overview.value.alerts || []
+  if (list.length === 0) return 'success'
+  const hasDanger = list.some((i) => i.level === 'error' || i.level === 'danger')
+  const hasWarning = list.some((i) => i.level === 'warning')
+  return hasDanger ? 'danger' : hasWarning ? 'warning' : 'info'
+})
+const alertBadgeText = computed(() => {
+  const list = overview.value.alerts || []
+  return list.length === 0 ? '正常' : `${list.length} 条告警`
+})
+const routeTrendOptions = computed(() => {
+  return (overview.value.routeTrends || []).map((item) => ({
+    key: buildRouteTrendKey(item),
+    label: `${item.method} ${item.route}`
+  }))
+})
+const selectedRouteTrend = computed(() => {
+  return (overview.value.routeTrends || []).find((item) => buildRouteTrendKey(item) === routeTrendKey.value) || null
+})
+const filteredRouteTrendPoints = computed(() => {
+  const points = [...(selectedRouteTrend.value?.points || [])].sort(
+    (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+  )
+  const rangeStart = resolveRouteTrendRangeStart(routeTrendRange.value)
+  return points.filter((item) => new Date(item.at).getTime() >= rangeStart)
+})
+const profileReadableSummary = computed(() => buildReadableProfile(profileForm.value.name, profileText.value))
+const filteredRoutes = computed(() => {
+  const keyword = routeKeyword.value.trim().toLowerCase()
+  const list = [...(overview.value.routes || [])].filter((item) => {
+    if (!keyword) {
+      return true
+    }
+    return `${item.method} ${item.route}`.toLowerCase().includes(keyword)
+  })
+  const sortKey = routeSort.value
+  list.sort((a, b) => Number(b[sortKey] || 0) - Number(a[sortKey] || 0))
+  return list
+})
+
+const routeTrendMetricMap = {
+  count: { label: '请求次数', unit: '次' },
+  errorCount: { label: '错误次数', unit: '次' },
+  avgMs: { label: '平均耗时', unit: 'ms' },
+  p95Ms: { label: 'P95 耗时', unit: 'ms' }
+}
+
+const syncSettingsFromOverview = () => {
+  settingForm.value.enableBlockProfile = !!runtimeInfo.value.blockProfileEnabled
+  settingForm.value.blockProfileRate = Number(runtimeInfo.value.blockProfileRate || 1000000)
+  settingForm.value.enableMutexProfile = !!runtimeInfo.value.mutexProfileEnabled
+  settingForm.value.mutexFraction = Number(runtimeInfo.value.mutexProfileFraction || 5)
+}
+
+const buildRouteTrendKey = (item) => `${item?.method || ''} ${item?.route || ''}`.trim()
+
+const resolveRouteTrendRangeStart = (range) => {
+  const now = Date.now()
+  if (range === '5m') {
+    return now - 5 * 60 * 1000
+  }
+  if (range === '15m') {
+    return now - 15 * 60 * 1000
+  }
+  return now - 60 * 60 * 1000
+}
+
+const formatRouteTrendTime = (value) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value || '-'
+  }
+  return date.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+}
+
+const formatTrendMetricValue = (metric, value) => {
+  const number = Number(value || 0)
+  if (metric === 'count' || metric === 'errorCount') {
+    return `${number.toFixed(0)} 次`
+  }
+  return `${number.toFixed(2)} ms`
+}
+
+const formatTrendAxisValue = (metric, value) => {
+  const number = Number(value || 0)
+  if (metric === 'count' || metric === 'errorCount') {
+    return `${number.toFixed(0)}`
+  }
+  return `${number.toFixed(0)} ms`
+}
+
+const queueRouteTrendRender = () => {
+  nextTick(() => {
+    renderRouteTrendChart()
+  })
+}
+
+const renderRouteTrendChart = () => {
+  if (!routeTrendChartRef.value) {
+    return
+  }
+  if (!routeTrendChart) {
+    routeTrendChart = echarts.init(routeTrendChartRef.value)
+  }
+
+  const selected = selectedRouteTrend.value
+  const points = filteredRouteTrendPoints.value
+  const metric = routeTrendMetric.value
+  const metricMeta = routeTrendMetricMap[metric] || routeTrendMetricMap.p95Ms
+  const hasData = !!selected && points.length > 0
+
+  routeTrendChart.setOption(
+    {
+      animationDuration: 200,
+      color: ['#2f6fed'],
+      title: {
+        left: 0,
+        top: 0,
+        text: selected ? `${selected.method} ${selected.route}` : '暂无路由趋势数据',
+        textStyle: {
+          color: '#243040',
+          fontSize: 14,
+          fontWeight: 600
+        }
+      },
+      grid: {
+        left: 52,
+        right: 24,
+        top: 56,
+        bottom: 36
+      },
+      tooltip: {
+        trigger: 'axis',
+        confine: true,
+        formatter(params) {
+          if (!params?.length || !selected) {
+            return '暂无数据'
+          }
+          const point = points[params[0].dataIndex] || {}
+          return [
+            `${selected.method} ${selected.route}`,
+            formatRouteTrendTime(point.at),
+            `${metricMeta.label}：${formatTrendMetricValue(metric, point[metric])}`,
+            `请求次数：${Number(point.count || 0).toFixed(0)} 次`,
+            `错误次数：${Number(point.errorCount || 0).toFixed(0)} 次`
+          ].join('<br/>')
+        }
+      },
+      xAxis: {
+        type: 'category',
+        boundaryGap: false,
+        data: hasData ? points.map((item) => formatRouteTrendTime(item.at)) : [],
+        axisLabel: {
+          color: '#6b7684'
+        }
+      },
+      yAxis: {
+        type: 'value',
+        name: metricMeta.label,
+        nameTextStyle: {
+          color: '#6b7684'
+        },
+        axisLabel: {
+          color: '#6b7684',
+          formatter: (value) => formatTrendAxisValue(metric, value)
+        },
+        splitLine: {
+          lineStyle: {
+            color: '#ebeff5'
+          }
+        }
+      },
+      graphic: hasData
+        ? []
+        : [
+            {
+              type: 'text',
+              left: 'center',
+              top: 'middle',
+              style: {
+                text: selected ? '当前时间范围内还没有采样点' : '先产生一些请求，这里才会出现趋势图',
+                fill: '#8a93a0',
+                fontSize: 14
+              }
+            }
+          ],
+      series: [
+        {
+          name: metricMeta.label,
+          type: 'line',
+          smooth: true,
+          showSymbol: false,
+          lineStyle: {
+            width: 3
+          },
+          areaStyle: {
+            opacity: 0.12
+          },
+          data: hasData ? points.map((item) => Number(item[metric] || 0)) : []
+        }
+      ]
+    },
+    true
+  )
+}
+
+const resizeRouteTrendChart = () => {
+  routeTrendChart?.resize()
+}
+
+const appendHistory = () => {
+  const now = Date.now()
+  const process = processInfo.value || {}
+  history.value.push({
+    timestamp: now,
+    time: new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    hostCpu: Number(hostCpuAverage.value || 0),
+    processCpu: Number(process.cpuPercent || 0),
+    rssMb: Number(process.memoryMb || 0),
+    heapMb: Number(runtimeInfo.value.heapAllocMb || 0),
+    goroutines: Number(runtimeInfo.value.goroutines || 0),
+    gcCount: Number(runtimeInfo.value.numGc || 0)
+  })
+  history.value = history.value.filter((item) => now - item.timestamp <= HISTORY_WINDOW_MS)
+}
+
+const loadOverview = async (showLoading = false) => {
+  if (showLoading) {
+    loading.value = true
+  }
+  try {
+    const res = await monitorApi.getMonitorOverview()
+    overview.value = normalizeOverview(res.data || {})
+    syncSettingsFromOverview()
+    lastRefreshAt.value = new Date().toLocaleString()
+    appendHistory()
+    queueRouteTrendRender()
+  } finally {
+    if (showLoading) {
+      loading.value = false
+    }
+  }
+}
+
+const handleManualRefresh = async () => {
+  await loadOverview(true)
+}
+
+const loadProfileText = async () => {
+  profileLoading.value = true
+  try {
+    const res = await monitorApi.getMonitorProfileText(profileForm.value)
+    profileText.value = res.data?.text || ''
+    profileMeta.value.collectedAt = res.data?.collectedAt || ''
+    profileMeta.value.truncated = !!res.data?.truncated
+  } finally {
+    profileLoading.value = false
+  }
+}
+
+const saveSettings = async () => {
+  const res = await monitorApi.updateMonitorSettings(settingForm.value)
+  overview.value.runtime = {
+    ...overview.value.runtime,
+    ...(res.data || {})
+  }
+  syncSettingsFromOverview()
+  ElMessage.success('采样设置已更新')
+}
+
+const runCpuCapture = async () => {
+  cpuLoading.value = true
+  try {
+    const res = await monitorApi.captureCPUProfile(cpuForm.value)
+    overview.value.pprof = {
+      ...(overview.value.pprof || {}),
+      lastCpuTop: res.data?.top || []
+    }
+    overview.value.runtime = {
+      ...overview.value.runtime,
+      lastCpuProfileAt: res.data?.capturedAt || '',
+      lastCpuProfileSeconds: res.data?.durationSeconds || cpuForm.value.seconds
+    }
+    ElMessage.success(`CPU Profile 抓取完成，时长 ${res.data?.durationSeconds || cpuForm.value.seconds} 秒`)
+  } finally {
+    cpuLoading.value = false
+  }
+}
+
+const loadProcessTop = async () => {
+  processLoading.value = true
+  try {
+    const res = await monitorApi.getMonitorProcessTop()
+    processSnapshot.value = res.data || createProcessSnapshot()
+    appendHistory()
+  } finally {
+    processLoading.value = false
+  }
+}
+
+const loadMySQLDiag = async () => {
+  mysqlDiagLoading.value = true
+  try {
+    const res = await monitorApi.getMonitorMySQLDiag()
+    mysqlDiag.value = res.data || null
+    if (mysqlDiag.value?.success) {
+      ElMessage.success('MySQL 诊断完成')
+    } else if (mysqlDiag.value?.error) {
+      ElMessage.warning('MySQL 诊断部分失败：' + mysqlDiag.value.error)
+    }
+  } finally {
+    mysqlDiagLoading.value = false
+  }
+}
+
+const formatDiagNumber = (value) => {
+  const number = Number(value || 0)
+  if (!Number.isFinite(number)) {
+    return '-'
+  }
+  return number.toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })
+}
+
+const downloadBlobResponse = async (response, fallbackName) => {
+  const blob = response?.data
+  if (!blob) {
+    return false
+  }
+  if (blob.type?.includes('application/json')) {
+    const text = await blob.text()
+    try {
+      const json = JSON.parse(text)
+      ElMessage.error(json.msg || '下载失败')
+    } catch {
+      ElMessage.error('下载失败')
+    }
+    return false
+  }
+
+  const disposition = response.headers?.['content-disposition'] || ''
+  const matched = disposition.match(/filename="?([^"]+)"?/)
+  const fileName = matched?.[1] || fallbackName
+  const href = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = href
+  link.download = decodeURIComponent(fileName)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.URL.revokeObjectURL(href)
+  return true
+}
+
+const downloadProfileRaw = async () => {
+  const response = await monitorApi.downloadMonitorProfile({
+    name: profileForm.value.name,
+    gc: profileForm.value.gc
+  })
+  await downloadBlobResponse(response, `${profileForm.value.name}.pprof`)
+}
+
+const downloadCpuRaw = async () => {
+  const response = await monitorApi.downloadLastCPUProfile()
+  await downloadBlobResponse(response, 'cpu.pprof')
+}
+
+const stopSystem = async () => {
+  await monitorApi.stopSystem()
+  ElMessage.warning('停止命令已发送')
+}
+
+const resetTimer = () => {
+  if (timer.value) {
+    clearInterval(timer.value)
+    timer.value = null
+  }
+  if (!autoRefresh.value) {
+    return
+  }
+  timer.value = setInterval(() => {
+    loadOverview()
+  }, autoRefreshSeconds.value * 1000)
+}
+
+watch(
+  routeTrendOptions,
+  (options) => {
+    if (!options.some((item) => item.key === routeTrendKey.value)) {
+      routeTrendKey.value = options[0]?.key || ''
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  [() => overview.value.routeTrends, routeTrendKey, routeTrendMetric, routeTrendRange],
+  () => {
+    queueRouteTrendRender()
+  },
+  { deep: true }
+)
+
+watch([autoRefresh, autoRefreshSeconds], resetTimer)
+
+onMounted(async () => {
+  window.addEventListener('resize', resizeRouteTrendChart)
+  await loadOverview(true)
+  await loadProcessTop()
+  resetTimer()
+  queueRouteTrendRender()
+})
+
+onUnmounted(() => {
+  if (timer.value) {
+    clearInterval(timer.value)
+    timer.value = null
+  }
+  window.removeEventListener('resize', resizeRouteTrendChart)
+  if (routeTrendChart) {
+    routeTrendChart.dispose()
+    routeTrendChart = null
+  }
+})
+
+const formatSeconds = (seconds) => {
+  const value = Number(seconds || 0)
+  if (value < 60) {
+    return `${value}s`
+  }
+  if (value < 3600) {
+    return `${Math.floor(value / 60)}m ${value % 60}s`
+  }
+  return `${Math.floor(value / 3600)}h ${Math.floor((value % 3600) / 60)}m`
+}
+
+const formatNumber = (value, digits = 1) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) {
+    return '-'
+  }
+  return number.toLocaleString('zh-CN', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+  })
+}
+
+const metricLevel = (value, warning, danger) => {
+  const number = Number(value || 0)
+  if (number >= danger) {
+    return 'danger'
+  }
+  if (number >= warning) {
+    return 'warning'
+  }
+  return 'normal'
+}
+
+const percent = (value) => `${(Number(value || 0) * 100).toFixed(2)}%`
+const mb = (value) => `${Number(value || 0).toFixed(2)} MB`
+const ms = (value) => `${Number(value || 0).toFixed(2)} ms`
+
+const buildReadableProfile = (name, text) => {
+  if (!text) {
+    return null
+  }
+  if (name === 'goroutine') {
+    return parseGoroutineProfile(text)
+  }
+  if (name === 'heap' || name === 'allocs') {
+    return parseHeapProfile(name, text)
+  }
+  if (name === 'block' || name === 'mutex') {
+    return parseContentionProfile(name, text)
+  }
+  return null
+}
+
+const parseGoroutineProfile = (text) => {
+  const normalizedText = String(text || '').replace(/\r/g, '')
+  const totalMatch = normalizedText.match(/goroutine profile:\s*total\s+(\d+)/i)
+  const sections = normalizedText.split(/\n\s*\n/)
+  const groups = []
+
+  for (const section of sections) {
+    const lines = section.split('\n').map((item) => item.trimEnd()).filter(Boolean)
+    if (!lines.length || !/^\d+\s+@/.test(lines[0].trim())) {
+      continue
+    }
+
+    const countMatch = lines[0].trim().match(/^(\d+)\s+@/)
+    const count = Number(countMatch?.[1] || 0)
+    const frames = lines.filter((line) => line.trim().startsWith('#')).map(parseStackFrame).filter(Boolean)
+    groups.push(explainGoroutineGroup(count, frames))
+  }
+
+  groups.sort(sortReadableGroups)
+
+  const total = Number(totalMatch?.[1] || groups.reduce((sum, item) => sum + Number(item.count || 0), 0))
+  const currentProfileCount = groups
+    .filter((item) => item.kind === 'currentProfile')
+    .reduce((sum, item) => sum + Number(item.count || 0), 0)
+  const watchCount = groups
+    .filter((item) => item.levelTag === 'danger' || item.levelTag === 'warning')
+    .reduce((sum, item) => sum + Number(item.count || 0), 0)
+  const backgroundCount = Math.max(total - currentProfileCount - watchCount, 0)
+
+  return {
+    level: watchCount > 0 ? 'warning' : 'success',
+    summaryText:
+      watchCount > 0
+        ? `共 ${total} 个 goroutine，其中 ${watchCount} 个值得优先关注。`
+        : `共 ${total} 个 goroutine，当前没有明显卡在业务代码里的堆栈。`,
+    metricItems: [
+      { label: 'goroutine 总数', value: `${total}` },
+      { label: '需关注堆栈', value: `${watchCount}` },
+      { label: '后台/等待', value: `${backgroundCount}` },
+      { label: '本次采样自身', value: `${currentProfileCount}` }
+    ],
+    groups
+  }
+}
+
+// 从 goroutine profile debug=2 文本中提取状态分布
+const parseGoroutineStates = (text) => {
+  if (!text) return null
+  const normalized = String(text).replace(/\r/g, '')
+  const stateMap = {}
+  const pattern = /goroutine \d+ \[([^\]]+)\]:/g
+  let match
+  let total = 0
+  while ((match = pattern.exec(normalized)) !== null) {
+    const state = match[1].trim()
+    stateMap[state] = (stateMap[state] || 0) + 1
+    total++
+  }
+  if (total === 0) return null
+  const sorted = Object.entries(stateMap)
+    .sort((a, b) => b[1] - a[1])
+    .map(([state, count]) => ({ state, count, percent: ((count / total) * 100).toFixed(1) }))
+  return { total, states: sorted }
+}
+
+const stateColor = (state) => {
+  const s = state.toLowerCase()
+  if (s === 'running') return '#2fb344'
+  if (s === 'runnable') return '#e6a23c'
+  if (s.includes('io')) return '#3a7bfd'
+  if (s === 'select') return '#8590a0'
+  if (s.includes('chan receive') || s.includes('chan send')) return '#f56c6c'
+  if (s.includes('semacquire')) return '#f04444'
+  if (s.includes('sleep') || s.includes('timer')) return '#9b59b6'
+  if (s.includes('syscall')) return '#1abc9c'
+  if (s.includes('gc')) return '#e67e22'
+  return '#909399'
+}
+
+const goroutineStates = computed(() => {
+  if (profileForm.value.name !== 'goroutine' || profileForm.value.debug !== 2) return null
+  return parseGoroutineStates(profileText.value)
+})
+
+const parseHeapProfile = (name, text) => {
+  const normalizedText = String(text || '').replace(/\r/g, '')
+  const headerMatch = normalizedText.match(/(?:heap|allocs) profile:\s*(\d+):\s*(\d+)\s*\[(\d+):\s*(\d+)\]/i)
+  const sections = normalizedText.split(/\n\s*\n/)
+  const groups = []
+
+  for (const section of sections) {
+    const lines = section.split('\n').map((item) => item.trimEnd()).filter(Boolean)
+    if (!lines.length || !/^\d+:\s*\d+\s+\[\d+:\s*\d+\]\s+@/.test(lines[0].trim())) {
+      continue
+    }
+
+    const groupMatch = lines[0].trim().match(/^(\d+):\s*(\d+)\s+\[(\d+):\s*(\d+)\]\s+@/)
+    const currentCount = Number(groupMatch?.[1] || 0)
+    const currentBytes = Number(groupMatch?.[2] || 0)
+    const totalCount = Number(groupMatch?.[3] || 0)
+    const totalBytes = Number(groupMatch?.[4] || 0)
+    const frames = lines.filter((line) => line.trim().startsWith('#')).map(parseStackFrame).filter(Boolean)
+
+    groups.push(explainHeapGroup(name, currentCount, currentBytes, totalCount, totalBytes, frames))
+  }
+
+  groups.sort(sortReadableGroups)
+
+  const currentObjects = Number(headerMatch?.[1] || 0)
+  const currentBytes = Number(headerMatch?.[2] || 0)
+  const totalObjects = Number(headerMatch?.[3] || 0)
+  const totalBytes = Number(headerMatch?.[4] || 0)
+
+  return {
+    level: currentBytes >= 512 * 1024 * 1024 ? 'warning' : 'info',
+    summaryText:
+      name === 'allocs'
+        ? '这里显示历史累计分配最重的调用路径，更适合找“哪里一直在创建对象”。'
+        : '这里显示当前仍留在堆里的对象来源，更适合找“现在哪些功能最吃内存”。',
+    metricItems: [
+      { label: '采样类型', value: name === 'allocs' ? '累计分配' : '当前堆快照' },
+      { label: '当前对象数', value: `${currentObjects}` },
+      { label: '当前内存', value: formatBytes(currentBytes) },
+      { label: '累计对象数', value: `${totalObjects}` },
+      { label: '累计内存', value: formatBytes(totalBytes) }
+    ],
+    groups
+  }
+}
+
+const parseContentionProfile = (name, text) => {
+  const normalizedText = String(text || '').replace(/\r/g, '')
+  const cyclesMatch = normalizedText.match(/cycles\/second\s*=\s*(\d+)/i)
+  const cyclesPerSecond = Number(cyclesMatch?.[1] || 0)
+  const sections = normalizedText.split(/\n\s*\n/)
+  const groups = []
+  let totalDelayMs = 0
+  let totalCount = 0
+
+  for (const section of sections) {
+    const lines = section.split('\n').map((item) => item.trimEnd()).filter(Boolean)
+    if (!lines.length || !/^\d+\s+\d+\s+@/.test(lines[0].trim())) {
+      continue
+    }
+
+    const groupMatch = lines[0].trim().match(/^(\d+)\s+(\d+)\s+@/)
+    const cycles = Number(groupMatch?.[1] || 0)
+    const count = Number(groupMatch?.[2] || 0)
+    const delayMs = cyclesPerSecond > 0 ? (cycles / cyclesPerSecond) * 1000 : 0
+    const frames = lines.filter((line) => line.trim().startsWith('#')).map(parseStackFrame).filter(Boolean)
+
+    totalDelayMs += delayMs
+    totalCount += count
+    groups.push(explainContentionGroup(name, count, delayMs, frames))
+  }
+
+  groups.sort(sortReadableGroups)
+
+  return {
+    level: groups.some((item) => item.levelTag === 'danger') ? 'warning' : 'info',
+    summaryText:
+      name === 'mutex'
+        ? '这里显示锁竞争最重的调用路径，重点看哪些业务函数在争抢同一把锁。'
+        : '这里显示阻塞等待最重的调用路径，重点看哪些业务功能卡在通道、锁或 I/O 上。',
+    metricItems: [
+      { label: '采样类型', value: name === 'mutex' ? '互斥锁竞争' : '阻塞等待' },
+      { label: '累计等待', value: `${totalDelayMs.toFixed(2)} ms` },
+      { label: '累计事件数', value: `${totalCount}` },
+      { label: 'cycles/second', value: cyclesPerSecond ? `${cyclesPerSecond}` : '-' }
+    ],
+    groups
+  }
+}
+
+const parseStackFrame = (line) => {
+  const cleaned = line.trim()
+  const matched = cleaned.match(/^#\s+(\S+)\s+(.+?)\+0x[0-9a-fA-F]+\s+(.+)$/)
+  if (!matched) {
+    return null
+  }
+
+  const fullFunction = matched[2].trim()
+  const location = matched[3].trim()
+  return {
+    pc: matched[1],
+    fullFunction,
+    functionName: shortFunctionName(fullFunction),
+    location,
+    shortLocation: shortLocationName(location)
+  }
+}
+
+const explainGoroutineGroup = (count, frames) => {
+  const frameNames = frames.map((item) => item.fullFunction)
+  const businessFrame = findBusinessFrame(frames)
+  const keyFrame = businessFrame || frames[0] || null
+
+  if (hasFrame(frameNames, 'runtime/pprof.writeGoroutine') || hasFrame(frameNames, 'server/app/monitoring.')) {
+    return buildReadableGroup(
+      count,
+      'currentProfile',
+      'info',
+      '当前正在生成监控快照',
+      '这是你点击“读取文本”时临时产生的采样协程，不是异常。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (hasFrame(frameNames, 'net/http.(*Server).Serve') || hasFrame(frameNames, 'internal/poll.(*FD).Accept')) {
+    return buildReadableGroup(
+      count,
+      'httpListen',
+      'success',
+      'HTTP 监听协程',
+      '服务正在等待新的 HTTP 请求进入，属于正常常驻协程。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (hasFrame(frameNames, 'net/http.(*connReader).backgroundRead')) {
+    return buildReadableGroup(
+      count,
+      'httpIdle',
+      'success',
+      'HTTP 连接空闲等待',
+      '连接已经建立，但当前只是等待客户端继续发送数据，通常不是卡死。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (hasFrame(frameNames, 'database/sql.(*DB).connectionCleaner')) {
+    return buildReadableGroup(
+      count,
+      'dbCleaner',
+      'success',
+      '数据库连接池清理',
+      '这是数据库连接池的后台清理协程，属于正常维护任务。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (hasFrame(frameNames, 'database/sql.(*DB).connectionOpener')) {
+    return buildReadableGroup(
+      count,
+      'dbOpener',
+      'success',
+      '数据库连接池建连',
+      '数据库连接池在后台等待或创建连接，通常是正常行为。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (hasFrame(frameNames, 'github.com/go-sql-driver/mysql.(*mysqlConn).startWatcher')) {
+    return buildReadableGroup(
+      count,
+      'mysqlWatcher',
+      'success',
+      'MySQL 驱动 watcher',
+      '这是 MySQL 驱动内部的后台 watcher，通常可以忽略。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (hasFrame(frameNames, 'github.com/robfig/cron/v3.(*Cron).run')) {
+    return buildReadableGroup(
+      count,
+      'cron',
+      'primary',
+      '定时任务调度',
+      '这是 cron 调度器的常驻协程；若怀疑某个定时任务卡住，还要继续看任务执行时的调用栈。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (hasFrame(frameNames, 'github.com/gogf/gf/v2/os/gtimer.(*Timer).loop')) {
+    return buildReadableGroup(
+      count,
+      'timer',
+      'primary',
+      '框架定时器循环',
+      '这是框架内部定时器循环，本身通常不是问题。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (hasFrame(frameNames, 'github.com/gogf/gf/v2/util/grand.asyncProducingRandomBufferBytesLoop')) {
+    return buildReadableGroup(
+      count,
+      'randomBuffer',
+      'info',
+      '随机数缓冲线程',
+      '框架在后台预生成随机字节缓存，属于正常框架行为。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (hasFrame(frameNames, 'github.com/qiniu/go-sdk/v7/internal/uplog')) {
+    return buildReadableGroup(
+      count,
+      'qiniuUplog',
+      'info',
+      '七牛上传日志线程',
+      '这是七牛 SDK 的后台日志缓冲协程，通常不是异常。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (hasFrame(frameNames, 'server/app/utils/Qqwry')) {
+    return buildReadableGroup(
+      count,
+      'qqwry',
+      'info',
+      'IP 地址库后台线程',
+      '这是 IP 地址库相关的后台协程，通常可以忽略。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (businessFrame) {
+    return buildReadableGroup(
+      count,
+      'business',
+      'warning',
+      '业务协程停在业务代码',
+      '这组协程已经进入你的业务代码，建议结合“慢请求 / 路由热点 / SQL 面板”继续排查。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+  if (hasFrame(frameNames, 'internal/poll.runtime_pollWait')) {
+    return buildReadableGroup(
+      count,
+      'netPoll',
+      'primary',
+      '网络 I/O 等待',
+      '协程正在等待网络事件，单看这一条堆栈无法说明异常，需要结合上层业务函数一起看。',
+      keyFrame,
+      `${count} 个 goroutine`,
+      count
+    )
+  }
+
+  return buildReadableGroup(
+    count,
+    'unknown',
+    'warning',
+    '暂时无法自动归类',
+    '这组协程没有命中已知模式，建议查看原始堆栈和第一个业务函数。',
+    keyFrame,
+    `${count} 个 goroutine`,
+    count
+  )
+}
+
+const explainHeapGroup = (name, currentCount, currentBytes, totalCount, totalBytes, frames) => {
+  const frameNames = frames.map((item) => item.fullFunction)
+  const businessFrame = findBusinessFrame(frames)
+  const keyFrame = businessFrame || frames[0] || null
+  const valueText = `${formatBytes(currentBytes)} / ${currentCount} 个；累计 ${formatBytes(totalBytes)} / ${totalCount} 次`
+  const sortValue = currentBytes || totalBytes || currentCount || totalCount
+  const count = currentCount || totalCount || 1
+
+  if (businessFrame) {
+    return buildReadableGroup(
+      count,
+      'businessHeap',
+      sortValue >= 64 * 1024 * 1024 ? 'warning' : 'primary',
+      '业务分配热点',
+      name === 'allocs'
+        ? '这条调用链历史上创建过很多对象，说明这个业务路径一直在分配内存。'
+        : '这条调用链当前还持有较多堆内存，通常更接近真正的内存占用来源。',
+      keyFrame,
+      valueText,
+      sortValue
+    )
+  }
+  if (hasFrame(frameNames, 'database/sql') || hasFrame(frameNames, 'gorm.io/')) {
+    return buildReadableGroup(
+      count,
+      'dbHeap',
+      'primary',
+      '数据库相关分配',
+      '这组内存来自数据库查询、扫描或 ORM 过程，建议结合慢 SQL 和结果集大小一起看。',
+      keyFrame,
+      valueText,
+      sortValue
+    )
+  }
+  if (hasFrame(frameNames, 'net/http') || hasFrame(frameNames, 'github.com/gin-gonic/gin')) {
+    return buildReadableGroup(
+      count,
+      'httpHeap',
+      'info',
+      'HTTP 链路分配',
+      '这组对象更多出现在请求处理链路里，常见于请求体、响应体、JSON 编解码。',
+      keyFrame,
+      valueText,
+      sortValue
+    )
+  }
+
+  return buildReadableGroup(
+    count,
+    'commonHeap',
+    'info',
+    '常见分配路径',
+    '这条路径没有明显落到业务函数，建议继续结合原始堆栈和上游调用者排查。',
+    keyFrame,
+    valueText,
+    sortValue
+  )
+}
+
+const explainContentionGroup = (name, count, delayMs, frames) => {
+  const frameNames = frames.map((item) => item.fullFunction)
+  const businessFrame = findBusinessFrame(frames)
+  const keyFrame = businessFrame || frames[0] || null
+  const valueText = `${delayMs.toFixed(2)} ms / ${count} 次`
+
+  if (businessFrame) {
+    return buildReadableGroup(
+      count,
+      `${name}Business`,
+      delayMs >= 200 ? 'danger' : 'warning',
+      name === 'mutex' ? '业务锁竞争' : '业务阻塞等待',
+      name === 'mutex'
+        ? '这条业务调用链发生了明显的锁竞争，优先看共享状态、批量操作或大事务。'
+        : '这条业务调用链有明显等待，通常要结合慢请求、SQL 或外部 I/O 一起判断。',
+      keyFrame,
+      valueText,
+      delayMs
+    )
+  }
+  if (hasFrame(frameNames, 'database/sql') || hasFrame(frameNames, 'github.com/go-sql-driver/mysql')) {
+    return buildReadableGroup(
+      count,
+      `${name}Db`,
+      'warning',
+      '数据库等待',
+      '等待点落在数据库相关调用里，优先看慢 SQL、锁等待、连接池和事务范围。',
+      keyFrame,
+      valueText,
+      delayMs
+    )
+  }
+  if (hasFrame(frameNames, 'sync.(*Mutex)') || hasFrame(frameNames, 'sync.(*RWMutex)')) {
+    return buildReadableGroup(
+      count,
+      `${name}Mutex`,
+      'primary',
+      '锁原语竞争',
+      '热点直接落在互斥锁原语上，说明多个 goroutine 正在争用同一把锁。',
+      keyFrame,
+      valueText,
+      delayMs
+    )
+  }
+
+  return buildReadableGroup(
+    count,
+    `${name}Common`,
+    'info',
+    name === 'mutex' ? '通用锁竞争' : '通用阻塞等待',
+    '这条等待链没有明显命中已知模式，建议继续查看原始文本里的上游业务调用。',
+    keyFrame,
+    valueText,
+    delayMs
+  )
+}
+
+const buildReadableGroup = (count, kind, levelTag, title, detail, frame, valueText, sortValue) => ({
+  count,
+  kind,
+  levelTag,
+  title,
+  detail,
+  valueText,
+  sortValue: Number(sortValue || 0),
+  featureText: frame?.functionName || '-',
+  locationText: frame?.shortLocation || '-'
+})
+
+const sortReadableGroups = (a, b) => {
+  const rank = {
+    danger: 0,
+    warning: 1,
+    primary: 2,
+    success: 3,
+    info: 4
+  }
+  if ((rank[a.levelTag] ?? 9) !== (rank[b.levelTag] ?? 9)) {
+    return (rank[a.levelTag] ?? 9) - (rank[b.levelTag] ?? 9)
+  }
+  return Number(b.sortValue || 0) - Number(a.sortValue || 0)
+}
+
+const findBusinessFrame = (frames) => {
+  return frames.find((item) => {
+    const name = item.fullFunction || ''
+    return name.includes('server/app/') &&
+      !name.includes('server/app/monitoring.') &&
+      !name.includes('server/app/router/middleware.') &&
+      !name.includes('.Q监控画像文本')
+  })
+}
+
+const hasFrame = (frameNames, keyword) => frameNames.some((item) => item.includes(keyword))
+
+const shortFunctionName = (name) => {
+  if (!name) {
+    return '-'
+  }
+  return name
+    .replace(/^server\/app\//, '')
+    .replace(/^github\.com\//, '')
+}
+
+const shortLocationName = (location) => {
+  if (!location) {
+    return '-'
+  }
+  const normalized = location.replace(/\\/g, '/')
+  const markers = ['/server2/', '/web3/', '/Go/src/', '/pkg/mod/']
+  for (const marker of markers) {
+    const index = normalized.indexOf(marker)
+    if (index >= 0) {
+      return normalized.slice(index + marker.length)
+    }
+  }
+  const matched = normalized.match(/([^/]+:\d+)$/)
+  return matched?.[1] || normalized
+}
+
+const formatBytes = (value) => {
+  const number = Number(value || 0)
+  if (number >= 1024 * 1024 * 1024) {
+    return `${(number / (1024 * 1024 * 1024)).toFixed(2)} GB`
+  }
+  if (number >= 1024 * 1024) {
+    return `${(number / (1024 * 1024)).toFixed(2)} MB`
+  }
+  if (number >= 1024) {
+    return `${(number / 1024).toFixed(2)} KB`
+  }
+  return `${number.toFixed(0)} B`
+}
+
+// ======================== AI 诊断助手上下文 ========================
+// 构建「当前页面所有监控数据」的精简快照，供 AI 读取分析
+const buildAiSnapshot = () => {
+  const ov = overview.value
+  const rt = runtimeInfo.value
+  const topRoutes = [...filteredRoutes.value].slice(0, 15).map((r) => ({
+    method: r.method, route: r.route, count: r.count, inFlight: r.inFlight,
+    avgMs: r.avgMs, p95Ms: r.p95Ms, maxMs: r.maxMs, totalMs: r.totalMs,
+    errorCount: r.errorCount, panicCount: r.panicCount, lastSeenAt: r.lastSeenAt
+  }))
+  const slowSqls = (databaseInfo.value.slowSqls || []).slice(-10).map((s) => ({
+    at: s.at, durationMs: s.durationMs, rowsAffected: s.rowsAffected, sql: s.sql
+  }))
+  const sqlTemplates = (databaseInfo.value.sqlTemplates || []).slice(0, 10).map((t) => ({
+    template: t.template, count: t.count, avgMs: t.avgMs, maxMs: t.maxMs,
+    deadlockCount: t.deadlockCount, lastAt: t.lastAt
+  }))
+  const dbErrors = (databaseInfo.value.errors || []).slice(-10).map((e) => ({
+    at: e.at, deadlock: e.deadlock, durationMs: e.durationMs, error: e.error, sql: e.sql
+  }))
+  const alerts = (ov.alerts || []).map((a) => ({ level: a.level, title: a.title, detail: a.detail }))
+  const activeReq = (ov.activeRequests || []).slice(0, 20).map((r) => ({
+    method: r.method, route: r.route, currentDurationMs: r.currentDurationMs
+  }))
+  const slowReq = (ov.slowRequests || []).slice(0, 20).map((r) => ({
+    method: r.method, route: r.route, status: r.status, durationMs: r.durationMs
+  }))
+  const panics = (ov.panicEvents || []).slice(-5).map((p) => ({
+    createdAt: p.createdAt, method: p.method, route: p.route, clientIp: p.clientIp,
+    error: p.error, stack: (p.stack || '').slice(0, 800)
+  }))
+  const procs = (processRows.value || []).slice(0, 10).map((p) => ({
+    pid: p.pid, name: p.name, cpuPercent: p.cpuPercent, memoryMb: p.memoryMb,
+    memoryPercent: p.memoryPercent, threadCount: p.threadCount, status: p.status,
+    startedAt: p.startedAt, command: (p.command || '').slice(0, 120)
+  }))
+  const hist = (history.value || []).slice(-30).map((h) => ({
+    time: h.time, hostCpu: h.hostCpu, processCpu: h.processCpu, rssMb: h.rssMb,
+    heapMb: h.heapMb, goroutines: h.goroutines, gcCount: h.gcCount
+  }))
+  return {
+    collectedAt: lastRefreshAt.value,
+    kpis: kpis.value,
+    server: {
+      os: serverOs.value,
+      cpuAverage: Number(hostCpuAverage.value || 0).toFixed(2),
+      cpuCores: serverCpu.value.cpus?.length || 0,
+      ram: serverRam.value,
+      disk: serverDisk.value
+    },
+    runtime: {
+      uptimeSeconds: rt.uptimeSeconds, goroutines: rt.goroutines,
+      heapAllocMb: rt.heapAllocMb, heapObjects: rt.heapObjects,
+      stackInuseMb: rt.stackInuseMb, numGc: rt.numGc, lastGcPauseMs: rt.lastGcPauseMs,
+      mutexWaitSeconds: rt.mutexWaitSeconds,
+      blockProfileEnabled: rt.blockProfileEnabled, blockProfileRate: rt.blockProfileRate,
+      mutexProfileEnabled: rt.mutexProfileEnabled, mutexProfileFraction: rt.mutexProfileFraction
+    },
+    database: {
+      enabled: databaseInfo.value.enabled,
+      slowThresholdMs: databaseInfo.value.slowThresholdMs,
+      pool: dbPool.value, slowSqls, sqlTemplates, errors: dbErrors
+    },
+    routes: { top: topRoutes, total: (ov.routes || []).length },
+    activeRequests: activeReq,
+    slowRequests: slowReq,
+    panicEvents: panics,
+    alerts,
+    processTop: procs,
+    mysqlDiag: buildMysqlDiagSummary(),
+    history: hist,
+    pprofProfiles: (profileOptions.value || []).map((p) => ({
+      name: p.name, enabled: p.enabled, count: p.count, description: p.description
+    })),
+    notes: notes.value
+  }
+}
+
+const buildMysqlDiagSummary = () => {
+  const d = mysqlDiag.value
+  if (!d) return null
+  return {
+    success: d.success, error: d.error, collectedAt: d.collectedAt,
+    processCount: d.processCount, sleepProcessCount: d.sleepProcessCount,
+    activeProcessCount: d.activeProcessCount, maxSleepSeconds: d.maxSleepSeconds,
+    slowQueryLogStatus: d.slowQueryLogStatus, longQueryTime: d.longQueryTime,
+    slowQueryLogFile: d.slowQueryLogFile, notes: d.notes,
+    topProcessList: (d.processList || []).slice(0, 15).map((p) => ({
+      id: p.id, user: p.user, host: p.host, db: p.db, command: p.command,
+      time: p.time, state: p.state, info: (p.info || '').slice(0, 200)
+    })),
+    topStatements: (d.statementSummary || []).slice(0, 10).map((s) => ({
+      schemaName: s.schemaName, digestText: (s.digestText || '').slice(0, 200),
+      countStar: s.countStar, sumTimerMs: s.sumTimerMs, avgTimerMs: s.avgTimerMs,
+      maxTimerMs: s.maxTimerMs, sumRowsExamined: s.sumRowsExamined, sumRowsSent: s.sumRowsSent,
+      sumTmpDiskTables: s.sumTmpDiskTables, sumNoIndexUsed: s.sumNoIndexUsed,
+      lastSeen: s.lastSeen, advice: s.advice, level: s.level
+    }))
+  }
+}
+
+const buildCpuSummary = () => {
+  const pprof = overview.value.pprof || {}
+  const rt = overview.value.runtime || {}
+  return {
+    capturedAt: rt.lastCpuProfileAt || '',
+    durationSeconds: rt.lastCpuProfileSeconds || 0,
+    top: (pprof.lastCpuTop || []).map((c) => ({
+      function: c.function, flatMs: c.flatMs, flatPercent: c.flatPercent,
+      cumulativeMs: c.cumulativeMs, cumulativePercent: c.cumulativePercent
+    }))
+  }
+}
+
+const buildProfileSummary = () => {
+  const summary = buildReadableProfile(profileForm.value.name, profileText.value)
+  return {
+    name: profileForm.value.name, debug: profileForm.value.debug,
+    collectedAt: profileMeta.value.collectedAt, truncated: profileMeta.value.truncated,
+    summary,
+    rawText: (profileText.value || '').slice(0, 4000)
+  }
+}
+
+// 供 AI 调用的「读取数据 + 调用本页接口」能力，全部返回 JSON 字符串
+const aiContext = {
+  // 读取当前所有监控数据快照
+  getSnapshot: () => JSON.stringify(buildAiSnapshot()),
+  // 刷新概览+进程排行后返回最新快照
+  refresh: async () => {
+    await loadOverview()
+    await loadProcessTop()
+    return JSON.stringify(buildAiSnapshot())
+  },
+  // 运行 MySQL 诊断并返回结果
+  runMysqlDiag: async () => {
+    await loadMySQLDiag()
+    return JSON.stringify(buildMysqlDiagSummary())
+  },
+  // 抓取 CPU profile
+  captureCpu: async (seconds) => {
+    cpuForm.value.seconds = Number(seconds) || 10
+    await runCpuCapture()
+    return JSON.stringify(buildCpuSummary())
+  },
+  // 读取 pprof 文本并返回解析摘要
+  loadProfile: async (args) => {
+    profileForm.value.name = args?.name || 'goroutine'
+    profileForm.value.debug = args?.debug || 1
+    if (args?.gc !== undefined) profileForm.value.gc = !!args.gc
+    await loadProfileText()
+    return JSON.stringify(buildProfileSummary())
+  },
+  // 保存 pprof 采样开关
+  saveSettings: async (args) => {
+    if (args?.enableBlockProfile !== undefined) settingForm.value.enableBlockProfile = !!args.enableBlockProfile
+    if (args?.blockProfileRate !== undefined) settingForm.value.blockProfileRate = Number(args.blockProfileRate)
+    if (args?.enableMutexProfile !== undefined) settingForm.value.enableMutexProfile = !!args.enableMutexProfile
+    if (args?.mutexFraction !== undefined) settingForm.value.mutexFraction = Number(args.mutexFraction)
+    await saveSettings()
+    return JSON.stringify({ ok: true, settings: { ...settingForm.value } })
+  }
+}
+</script>
+
+<script>
+export default {
+  name: 'MonitorPage'
+}
+</script>
+
+<style lang="scss">
+.monitor-page {
+  --monitor-bg: #f4f7fb;
+  --monitor-surface: #ffffff;
+  --monitor-surface-alt: #f8fafc;
+  --monitor-surface-hover: #f5f8fc;
+  --monitor-border: #e5eaf1;
+  --monitor-text: #1f2937;
+  --monitor-text-secondary: #556070;
+  --monitor-text-tertiary: #8590a0;
+  --monitor-accent: #3a7bfd;
+  --monitor-accent-rgb: 58, 123, 253;
+  --monitor-success: #2fb344;
+  --monitor-warning: #e6a23c;
+  --monitor-error: #f04444;
+  --monitor-shadow-rgb: 31, 45, 61;
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  gap: 16px;
+  padding: 16px;
+  background: var(--monitor-bg);
+  color: var(--monitor-text);
+}
+
+.monitor-card,
+.toolbar-card,
+.panel-card,
+.summary-card {
+  border: 1px solid var(--monitor-border);
+  border-radius: 8px;
+  background: var(--monitor-surface);
+  box-shadow: 0 1px 3px rgba(var(--monitor-shadow-rgb), 0.05);
+}
+
+.monitor-page :deep(.el-card__header) {
+  padding: 13px 16px;
+  border-bottom-color: var(--monitor-border);
+}
+
+.monitor-page :deep(.el-card__body) {
+  padding: 16px;
+}
+
+.monitor-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 112px;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.metric-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  color: var(--monitor-accent);
+  background: rgba(var(--monitor-accent-rgb), 0.1);
+}
+
+.metric-card__icon.is-warning {
+  color: var(--monitor-warning);
+}
+
+.metric-card__icon.is-danger {
+  color: var(--monitor-error);
+}
+
+.metric-card__content {
+  min-width: 0;
+}
+
+.metric-card__label {
+  color: var(--monitor-text-secondary);
+  font-size: 12px;
+}
+
+.metric-card__value {
+  margin-top: 2px;
+  color: var(--monitor-text);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.metric-card__value span {
+  margin-left: 4px;
+  color: var(--monitor-text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.metric-card__meta {
+  margin-top: 6px;
+  color: var(--monitor-text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.monitor-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.resource-panel {
+  min-width: 0;
+}
+
+.section-title {
+  color: var(--monitor-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px;
+}
+
+.resource-row,
+.resource-progress > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--monitor-text-secondary);
+  font-size: 13px;
+}
+
+.resource-row strong,
+.resource-progress strong {
+  color: var(--monitor-text);
+  font-weight: 500;
+  text-align: right;
+}
+
+.resource-progress {
+  grid-column: 1 / -1;
+}
+
+.resource-progress > div {
+  margin-bottom: 6px;
+}
+
+.toolbar-card,
+.panel-card,
+.summary-card {
+  border-radius: 14px;
+}
+
+.toolbar-row,
+.toolbar-left,
+.toolbar-actions,
+.card-header,
+.header-tools,
+.cpu-toolbar,
+.cpu-actions,
+.setting-row {
+  display: flex;
+  align-items: center;
+}
+
+.toolbar-row,
+.card-header,
+.cpu-toolbar {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toolbar-left,
+.toolbar-actions,
+.header-tools,
+.cpu-actions {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.title-block h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.title-block p {
+  margin: 6px 0 0;
+  color: #707985;
+  font-size: 13px;
+}
+
+.summary-grid,
+.content-grid {
+  margin-top: 0;
+}
+
+.summary-card {
+  height: 280px;
+}
+
+.summary-card :deep(.el-card__body) {
+  height: calc(100% - 50px);
+  overflow: auto;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #5a6470;
+}
+
+.metric-row strong {
+  color: #17212b;
+}
+
+.metric-note {
+  margin-top: 8px;
+  color: #717b88;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.disk-row {
+  margin-top: 12px;
+}
+
+.mini-bars {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  flex: 1;
+  overflow: auto;
+  max-height: 120px;
+  padding-right: 4px;
+}
+
+.mini-bar-item {
+  background: #f7f9fc;
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.mini-bar-item span {
+  display: block;
+  margin-bottom: 6px;
+  color: #66707d;
+  font-size: 12px;
+}
+
+.hint-alert {
+  margin-bottom: 12px;
+}
+
+.alert-card :deep(.el-card__body) {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.alert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.monitor-alert {
+  border-radius: 12px;
+}
+
+.alert-detail {
+  line-height: 1.6;
+}
+
+/* 空状态与等高布局 */
+.monitor-empty {
+  padding: 24px 0;
+}
+.monitor-empty-sm {
+  padding: 12px 0;
+}
+
+/* 让同一行 el-card 等高，避免数据少时高度不一致 */
+.content-grid .el-col > .el-card {
+  height: 100%;
+}
+.content-grid .el-col > .el-card > :deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+/* 监控告警：列表区可滚动，空状态撑开 */
+.alert-card :deep(.el-card__body) {
+  max-height: 360px;
+  overflow: auto;
+}
+.alert-card .alert-list {
+  flex: 1;
+}
+
+/* 活动请求/慢请求：两个子表区域等高 */
+.req-card :deep(.el-card__body) .sub-block {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.req-card :deep(.el-card__body) .sub-block .el-table {
+  flex: 1;
+}
+
+/* 异常/死锁线索：子表与Panic区等高 */
+.panic-card :deep(.el-card__body) .sub-block {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.panic-card :deep(.el-card__body) .sub-block .el-table,
+.panic-card :deep(.el-card__body) .sub-block .el-collapse {
+  flex: 1;
+}
+
+.route-trend-route {
+  width: 280px;
+}
+
+.route-trend-metric,
+.route-trend-range {
+  width: 140px;
+}
+
+.route-trend-chart {
+  height: 320px;
+}
+
+.route-filter {
+  width: 240px;
+}
+
+.route-sort,
+.profile-select {
+  width: 150px;
+}
+
+.sub-block {
+  margin-top: 16px;
+}
+
+.first-sub-block {
+  margin-top: 0;
+}
+
+.sub-title {
+  margin-bottom: 10px;
+  color: #27313c;
+  font-weight: 600;
+}
+
+.mini-desc {
+  margin-bottom: 12px;
+}
+
+.panic-meta {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: #596473;
+}
+
+.stack-box,
+.profile-box {
+  margin: 0;
+  padding: 12px;
+  background: #0f1720;
+  color: #dfe7f1;
+  border-radius: 10px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.profile-card .profile-box {
+  min-height: 520px;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.setting-item {
+  padding: 14px 16px;
+  border: 1px solid #e8edf3;
+  border-radius: 14px;
+  background: #fbfcfe;
+}
+
+.setting-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.setting-title {
+  color: #27313c;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.setting-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.setting-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.setting-input-label {
+  min-width: 72px;
+  color: #6b7684;
+  font-size: 12px;
+}
+
+.setting-input-row :deep(.el-input-number) {
+  width: 160px;
+}
+
+.setting-input-row :deep(.el-input-number .el-input__inner) {
+  text-align: center;
+}
+
+.setting-actions {
+  padding-top: 2px;
+}
+
+.setting-help {
+  color: #717b88;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
+.profile-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: #6b7684;
+}
+
+.readable-summary {
+  margin-bottom: 14px;
+}
+
+.readable-desc {
+  margin-bottom: 12px;
+}
+
+.readable-table {
+  margin-bottom: 12px;
+}
+
+.raw-profile-title {
+  margin-bottom: 8px;
+}
+
+/* goroutine 状态分布 */
+.goroutine-states {
+  margin-bottom: 14px;
+  padding: 14px;
+  background: #f8fafc;
+  border: 1px solid #e5eaf1;
+  border-radius: 10px;
+}
+.gs-grid {
+  display: grid;
+  gap: 8px;
+}
+.gs-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.gs-label {
+  width: 120px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #556070;
+  flex-shrink: 0;
+}
+.gs-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.gs-bar-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gs-bar {
+  height: 14px;
+  border-radius: 4px;
+  min-width: 2px;
+  transition: width 0.3s;
+}
+.gs-value {
+  font-size: 12px;
+  color: #1f2937;
+  font-weight: 500;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.notes-list {
+  margin: 16px 0 0;
+  padding-left: 18px;
+  color: #5e6976;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.mysql-slow-log-path {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 12px;
+  color: #3a7bfd;
+  word-break: break-all;
+}
+
+.mysql-time-normal {
+  color: #1f2937;
+  font-variant-numeric: tabular-nums;
+}
+
+.mysql-time-warning {
+  color: #e6a23c;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mysql-time-danger {
+  color: #f04444;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.mysql-advice {
+  margin-left: 6px;
+  color: #5e6976;
+  font-size: 12px;
+}
+
+@media (max-width: 960px) {
+  .monitor-kpi-grid,
+  .monitor-chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .route-filter,
+  .route-sort,
+  .profile-select,
+  .route-trend-route,
+  .route-trend-metric,
+  .route-trend-range {
+    width: 100%;
+  }
+
+  .toolbar-actions,
+  .header-tools,
+  .cpu-actions,
+  .setting-top,
+  .setting-input-row {
+    width: 100%;
+  }
+
+  .toolbar-actions > *,
+  .header-tools > *,
+  .cpu-actions > * {
+    flex: 1 1 auto;
+  }
+
+  .setting-toggle {
+    margin-left: auto;
+  }
+
+  .setting-input-row :deep(.el-input-number) {
+    width: 100%;
+  }
+}
+
+@media (max-width: 1400px) {
+  .monitor-kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .monitor-page {
+    padding: 10px;
+  }
+
+  .monitor-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-card {
+    min-height: 104px;
+    padding: 12px;
+  }
+
+  .metric-card__icon {
+    display: none;
+  }
+
+  .metric-card__value {
+    font-size: 20px;
+  }
+
+  .resource-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section-header,
+  .toolbar-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .toolbar-actions,
+  .header-tools {
+    width: 100%;
+  }
+}
+</style>

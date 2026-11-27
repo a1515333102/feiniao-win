@@ -1,0 +1,10 @@
+# 三套前端是 //go:embed 原样嵌入的资产，必须保持提取时的原始字节，禁止行尾转换与 diff 处理
+ky/app/web/** -text
+
+# Go 源码统一 LF
+*.go text eol=lf
+
+# 脚本与文档
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf

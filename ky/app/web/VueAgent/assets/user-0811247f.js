@@ -1,0 +1,1 @@
+import{s}from"./request-94606e2b.js";import{取 as t}from"./index-a199faff.js";const a=t()+"/Base/",o=t=>s({url:a+"Login",method:"post",data:t}),r=t=>s({url:a+"Captcha",method:"post",data:t});export{r as c,o as l};
