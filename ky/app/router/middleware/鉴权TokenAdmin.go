@@ -7,7 +7,6 @@ import (
 	"server/app/models/constant"
 	"server/app/models/dbm"
 	"server/app/models/old/response"
-	"strings"
 	"time"
 )
 
@@ -60,12 +59,10 @@ func IsTokenAdmin() gin.HandlerFunc {
 			return
 		}
 
-		//如果会员没登录,且请求没有 kuaiyan 关键字,就跳转快验个人中心
-		if global.X系统信息.H会员帐号 == "" && strings.Index(c.Request.RequestURI, "kuaiYan") == -1 && strings.Index(c.Request.RequestURI, "GetAdminInfo") == -1 {
-			response.FailTokenErr(gin.H{"KuaiYan": true}, "", c)
-			c.Abort()
-			return
-		}
+		// 原版在此强制要求快验作者账号已登录：H会员帐号 为空时除 kuaiYan 相关接口外
+		// 一律返回 KuaiYan:true 并把前端顶回「个人中心」登录框。
+		// 自建部署没有快验账号体系，该页面已移除，故此校验一并去掉，
+		// 后台仅依赖管理员自己的登录令牌(IsTokenAdmin 上方的 DB_LinksToken 校验)。
 
 		/*if strings.Index(c.Request.RequestURI, "KuaiYan") == -1 && strings.Index(c.Request.RequestURI, "GetAdminInfo") == -1 && global.X系统信息.D到期时间 < time.Now().Unix() {
 			局_计数 := 0
