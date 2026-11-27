@@ -214,17 +214,11 @@ const onLogin = async (loginInfo) => {
     Store.commit("setToken", res.data.token)
     Store.commit("setUserInfo", res.data.userInfo)
 
-    if (res.data.KuaiYan === true) {
-      router.push('/个人中心').catch(err => {
-        console.error('路由跳转失败:', err)
-        ElMessage.error('跳转失败: ' + err.message)
-      })
-    } else {
-      router.replace({path: "/"}).catch(err => {
-        console.error('路由跳转失败:', err)
-        ElMessage.error('跳转失败: ' + err.message)
-      })
-    }
+    // 个人中心（快验作者账号面板）已移除，统一进入仪表台
+    router.replace({path: "/"}).catch(err => {
+      console.error('路由跳转失败:', err)
+      ElMessage.error('跳转失败: ' + err.message)
+    })
     ElMessage.success(res.msg)
     return true
   } else {

@@ -15,7 +15,6 @@
     </span>
     <template #dropdown>
       <el-dropdown-menu>
-        <el-dropdown-item @click="on个人中心">个人中心</el-dropdown-item>
         <el-dropdown-item @click="on修改密码">修改密码</el-dropdown-item>
         <el-dropdown-item @click="on退出登录">退出登录</el-dropdown-item>
       </el-dropdown-menu>
@@ -67,9 +66,6 @@ const on退出登录 = async () => {
 }
 
 
-const on个人中心 = async () => {
-  on路由跳转("个人中心")
-}
 const onGetUserInfo = async () => {
   console.log(Store.state.userInfo)
   if (!Store.state.userInfo?.adminInfo?.User) {

@@ -183,7 +183,6 @@ const toolCards = ref([
   { label: '用户消息', icon: 'ChatLineSquare', name: '用户消息', color: '#b37feb', bg: 'rgba(179, 127, 235, 0.1)' },
   { label: '卡号列表', icon: 'Tickets', name: '卡号列表', color: '#e6a23c', bg: 'rgba(230, 162, 60, 0.1)' },
   { label: '充值订单', icon: 'Wallet', name: '支付充值订单', color: '#f56c6c', bg: 'rgba(245, 108, 108, 0.1)' },
-  { label: '个人中心', icon: 'User', name: '个人中心', color: '#5cdbd3', bg: 'rgba(92, 219, 211, 0.1)' },
 ])
 
 // 周/月对比卡片

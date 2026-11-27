@@ -44,15 +44,9 @@ service.interceptors.response.use(
             //判断失败原因
 
             // 101登录状态失效 清除token 本地数据 跳转登陆页
-            if (response.data.code === 202 && response.data.data.KuaiYan === true) {
-
-                console.info("快验个人中心未登录")
-
-                router.push('/个人中心')
-                if (response.data.msg!==""){
-                    ElMessage.success(response.data.msg || decodeURI(response.headers.msg))
-                }
-            } else if (response.data.code === 202) {
+            // 注：原「快验个人中心未登录」分支已移除——该页面是作者账号面板，本部署不再使用，
+            //     遇到 202 一律按 token 失效处理，回到登录页
+            if (response.data.code === 202) {
 
                 console.info("登录token被注销了")
                 console.info(response)
