@@ -8,3 +8,7 @@ ky/app/web/** -text
 *.py text eol=lf
 *.md text eol=lf
 *.json text eol=lf
+
+# CI 工作流统一 LF，避免 Windows 上 CRLF 混入
+*.yml text eol=lf
+*.yaml text eol=lf

@@ -1,0 +1,146 @@
+name: 构建 Windows 版
+
+# 触发方式：
+#   1. push 到 main             -> 编译并上传 artifact（供下载验证）
+#   2. push 形如 v1.0.550 的 tag -> 编译 + 自动发布 Release（附 exe 与 SHA256）
+#   3. 手动 Actions -> Run workflow
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一分支连续推送时，取消上一次未跑完的构建
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.25"
+
+jobs:
+  # ---------------------------------------------------------------
+  # 编译：图标资源 + 版本信息 + exe
+  # ---------------------------------------------------------------
+  build:
+    name: 编译 feiniao.exe
+    runs-on: windows-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # 两个 module 共用一个缓存键，EFunc 是 ky 的本地 replace
+          cache: true
+          cache-dependency-path: |
+            ky/go.sum
+            EFunc/go.sum
+
+      - name: 安装 goversioninfo
+        shell: bash
+        run: |
+          go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: 拉取依赖
+        shell: bash
+        run: |
+          cd EFunc && go mod download && cd ..
+          cd ky    && go mod download && cd ..
+
+      - name: 生成图标与版本资源
+        shell: bash
+        working-directory: ky
+        run: |
+          # 必须生成在 ky/ 下，且编译时用 "go build ."，
+          # 否则同目录的 .syso 不会被链接，exe 会丢图标
+          test -f app/resource/app.ico || { echo "缺少图标 app/resource/app.ico"; exit 1; }
+          goversioninfo -o resource_windows_amd64.syso versioninfo.json
+          ls -l resource_windows_amd64.syso
+
+      - name: 编译
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          mkdir -p dist
+          cd ky
+          go build -o ../dist/feiniao.exe .
+          cd ..
+          ls -l dist/feiniao.exe
+
+      - name: 校验产物（体积 / 图标 / 版本信息）
+        shell: pwsh
+        run: |
+          $f = "dist\feiniao.exe"
+          if (-not (Test-Path $f)) { throw "编译产物不存在" }
+          $size = (Get-Item $f).Length
+          Write-Host "体积: $([math]::Round($size/1MB,1)) MB"
+          if ($size -lt 10MB) { throw "体积异常（$size 字节），可能图标资源丢失" }
+          $v = (Get-Item $f).VersionInfo
+          Write-Host "产品名: $($v.ProductName)"
+          Write-Host "版本号: $($v.FileVersion)"
+          if ($v.ProductName -ne "飞鸟快验") { throw "版本信息未写入，检查 syso 是否被链接" }
+
+      - name: 计算校验和
+        shell: bash
+        run: |
+          cd dist
+          sha256sum feiniao.exe > feiniao.exe.sha256
+          cat feiniao.exe.sha256
+
+      - name: 上传 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: feiniao-windows-amd64
+          path: |
+            dist/feiniao.exe
+            dist/feiniao.exe.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------
+  # 发布：只有打 tag 时才跑，自动附到 Release
+  # ---------------------------------------------------------------
+  release:
+    name: 发布 Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载编译产物
+        uses: actions/download-artifact@v4
+        with:
+          name: feiniao-windows-amd64
+          path: dist
+
+      - name: 检查产物
+        run: ls -lh dist
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 飞鸟快验 Windows ${{ github.ref_name }}
+          files: |
+            dist/feiniao.exe
+            dist/feiniao.exe.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            Windows 版自编译产物（Go 静态编译，单文件，无需运行时）。
+
+            - 版本：`${{ github.ref_name }}`
+            - 架构：windows/amd64
+            - 校验：见 `feiniao.exe.sha256`
+
+            **首次运行**：把 `dist/config.example.json` 复制为同目录 `config.json`，
+            填好 MySQL 连接后启动，浏览器打开 `http://127.0.0.1:18888/Admin/`。
