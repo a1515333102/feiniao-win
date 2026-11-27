@@ -32,6 +32,9 @@ dist/*.log
 # 在仓库根目录直接跑 exe 时程序也会在这里生成一份
 /config.json
 
+# ===== 本机配置备份（含支付商户密钥等敏感内容，绝不入库）=====
+.local-backup/
+
 # ===== 系统文件 =====
 .DS_Store
 Thumbs.db
