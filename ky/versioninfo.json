@@ -1,0 +1,40 @@
+{
+  "FixedFileInfo": {
+    "FileVersion": {
+      "Major": 1,
+      "Minor": 0,
+      "Patch": 550,
+      "Build": 0
+    },
+    "ProductVersion": {
+      "Major": 1,
+      "Minor": 0,
+      "Patch": 550,
+      "Build": 0
+    },
+    "FileFlagsMask": "3f",
+    "FileFlags": "00",
+    "FileOS": "040004",
+    "FileType": "01",
+    "FileSubType": "00"
+  },
+  "StringFileInfo": {
+    "Comments": "服务端后台程序（网络验证 / 软件授权系统）",
+    "CompanyName": "飞鸟快验",
+    "FileDescription": "飞鸟快验 Windows 版",
+    "FileVersion": "1.0.550.0",
+    "InternalName": "feiniao",
+    "LegalCopyright": "Copyright (C) 2026",
+    "OriginalFilename": "feiniao.exe",
+    "ProductName": "飞鸟快验",
+    "ProductVersion": "1.0.550.0"
+  },
+  "VarFileInfo": {
+    "Translation": {
+      "LangID": "0409",
+      "CharsetID": "04B0"
+    }
+  },
+  "IconPath": "app/resource/app.ico",
+  "ManifestPath": ""
+}

@@ -13,6 +13,8 @@ html_*.html
 dist/feiniao.exe
 dist/*.exe
 *.log
+# 图标/版本资源由 build.bat 从 app.ico + versioninfo.json 现生成，不存生成物
+ky/resource_windows_amd64.syso
 
 # ===== 前端依赖与构建中间产物 =====
 web/node_modules/
