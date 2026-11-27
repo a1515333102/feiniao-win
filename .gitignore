@@ -9,7 +9,7 @@ html_*.html
 # ===== 上游 git 历史归档（仅本机保留）=====
 .git-archived/
 
-# ===== 编译产物（exe 走 Release，不进仓库）=====
+# ===== 编译产物（不入库，仓库只存源码）=====
 dist/feiniao.exe
 dist/*.exe
 *.log

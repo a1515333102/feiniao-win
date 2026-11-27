@@ -7,7 +7,7 @@
 | 上游后端 | [x1056795985/KuaiYanGo2](https://github.com/x1056795985/KuaiYanGo2) v1.0.475 |
 | 上游前端 | [x1056795985/KuaiYanWeb](https://github.com/x1056795985/KuaiYanWeb)（仅管理员后台） |
 | 二进制参照 | 官方 1.0.548 Linux 版（`.bin`，UPX 压缩的 ELF） |
-| 当前产物 | `feiniao.exe`，80.9 MB，单文件绿色版，见 Release |
+| 产物形态 | 纯源码仓库，`go build` 自行产出 Windows 单文件可执行程序（约 80.9 MB） |
 
 > 这是**服务端后台程序**（网络验证 / 软件授权系统），默认监听 `18888`。不是桌面软件，需要 MySQL 5.7+。
 
