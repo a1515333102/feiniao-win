@@ -2,7 +2,7 @@
 """扫描 KuaiYanGo2 中对 EFunc/utils 的依赖，量化移植工作量。"""
 import os, re, collections, json
 
-ROOT = r"C:\Users\Administrator\WorkBuddy\2026-11-27-09-43-34\ky"
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ky")
 ID = r'[A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]*'
 
 GO_KEYWORDS = {

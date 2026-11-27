@@ -4,7 +4,7 @@ v3: 生成 EFunc/utils 待实现函数清单（按族分组 + 参数个数 + 典
 """
 import os, re, collections, json
 
-ROOT = r"C:\Users\Administrator\WorkBuddy\2026-11-27-09-43-34\ky"
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ky")
 OUT = os.path.join(os.path.dirname(ROOT), "EFunc待实现清单.md")
 ID = r'[A-Za-z_\u4e00-\u9fff][\w\u4e00-\u9fff]*'
 
