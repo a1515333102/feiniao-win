@@ -1,5 +1,7 @@
 # 飞鸟快验 · Windows 维护版
 
+[![构建 Windows 版](https://github.com/a1515333102/feiniao-win/actions/workflows/build.yml/badge.svg)](https://github.com/a1515333102/feiniao-win/actions/workflows/build.yml)
+
 自建的 Windows 编译/运行分支，基于官方源码补齐了缺失依赖，使其能在 Windows 上直接 `go build` 出可执行文件并运行。
 
 | 项 | 说明 |
@@ -7,7 +9,7 @@
 | 上游后端 | [x1056795985/KuaiYanGo2](https://github.com/x1056795985/KuaiYanGo2) v1.0.475 |
 | 上游前端 | [x1056795985/KuaiYanWeb](https://github.com/x1056795985/KuaiYanWeb)（仅管理员后台） |
 | 二进制参照 | 官方 1.0.548 Linux 版（`.bin`，UPX 压缩的 ELF） |
-| 产物形态 | 纯源码仓库，`go build` 自行产出 Windows 单文件可执行程序（约 80.9 MB） |
+| 产物形态 | 纯源码仓库，CI 或本地 `go build` 产出 Windows 单文件可执行程序（约 81 MB） |
 
 > 这是**服务端后台程序**（网络验证 / 软件授权系统），默认监听 `18888`。不是桌面软件，需要 MySQL 5.7+。
 
@@ -79,14 +81,50 @@ replace EFunc => ../EFunc
 
 需要 Go 1.25+（本机验证版本 1.25.14）、Node 18+（仅重建管理员前端时需要）。
 
+### 方式一：本地一键构建
+
+```bat
+build.bat
+```
+
+脚本会先生成图标与版本资源，再编译到 `dist\feiniao.exe`，并打印体积。
+
+### 方式二：手动命令
+
 ```powershell
 $env:CGO_ENABLED = "0"
 $env:GOPROXY = "https://goproxy.cn,direct"
 cd ky
-go build -o ..\dist\feiniao.exe main.go
+goversioninfo -o resource_windows_amd64.syso versioninfo.json
+go build -o ..\dist\feiniao.exe .
 ```
 
+> **必须写 `go build .`，不能写 `go build main.go`。**
+> 后者只编译指定的单个文件，同目录的 `resource_windows_amd64.syso` 不参与链接，
+> 编出来的 exe 没有图标、没有版本信息——这一点很容易踩。
+
 纯 Go、无 cgo、无平台专用文件（`_linux.go` 之类一个都没有），Windows / Linux 都能直接编。
+
+### 方式三：GitHub Actions（推荐发版用）
+
+工作流 `.github/workflows/build.yml`，windows-latest + Go 1.25，流程与 `build.bat` 完全一致：
+
+| 触发 | 结果 |
+|---|---|
+| push `main` / PR / 手动 Run workflow | 编译并上传 artifact `feiniao-windows-amd64`（含 exe 与 sha256，保留 30 天） |
+| push 形如 `v1.0.550` 的 tag | 编译 + 自动创建 Release，附 exe 与校验和 |
+
+CI 里带产物校验：体积小于 10MB 判为图标资源丢失、`ProductName` 不是「飞鸟快验」判为版本信息未写入，任一不满足直接失败，避免静默产出残废 exe。
+
+打 tag 发版：
+
+```bash
+git tag v1.0.550
+git push origin v1.0.550
+```
+
+前端产物随源码入库（`ky/app/web` 是 `//go:embed` 资产），CI 只编译不打前端。
+改过 `web/src` 后需本地 `npx vite build`，把 `web/dist` 的产物同步到 `ky/app/web/VueAdmin/` 再提交。
 
 ### 重建管理员前端（可选）
 

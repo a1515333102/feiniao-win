@@ -4,7 +4,7 @@ go 1.25.0
 
 require EFunc v0.0.0
 
-replace EFunc => C:/Users/Administrator/WorkBuddy/2026-11-27-09-43-34/EFunc
+replace EFunc => ../EFunc
 
 require (
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
